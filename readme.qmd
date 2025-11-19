@@ -43,9 +43,9 @@ This guide aims to provide learners with the conceptual understanding and practi
 
 This includes:
 
-1. Understanding the Structure of Android Log Data (e.g. Identify key variables typically found in Android logs)
-2. Data Import and preprocessing with tidyverse
-3. Operationalising exposure and media usage (e.g. session duration, app usage, ...)
+1.  Understanding the Structure of Android Log Data (e.g. Identify key variables typically found in Android logs)
+2.  Data Import and preprocessing with tidyverse
+3.  Operationalising exposure and media usage (e.g. session duration, app usage, ...)
 
 ## Target audience
 
@@ -75,9 +75,16 @@ require(dplyr)
 require(lubridate)
 require(purrr)
 require(tidyr)
-require(webtrackR)
+require(kableExtra)
 require(ggplot2)
 require(nord)
+library(extrafont)
+```
+
+```{r}
+#| message: false
+# Options
+options(scipen = 999)
 ```
 
 ## Duration
@@ -92,11 +99,202 @@ This method has been used in previous studies to evaluate ... [e.g. @mueller:202
 
 ## Some Context about Android App Log Data
 
-Android app log data are automatically generated records that capture interactions between users, apps, and the operating system on Android devices. These logs originate from system services and applications that record events such as app launches, screen on/off states, foreground and background transitions, notifications, and sensor activities. They often include time-stamped information identifying the event type, the app or process involved (via package names), and contextual metadata such as battery status, network connectivity, or user interactions. 
+Android app log data are automatically generated records that capture interactions between users, apps, and the operating system on Android devices. These logs originate from system services and applications that record events such as app launches, screen on/off states, foreground and background transitions, notifications, and sensor activities. They often include time-stamped information identifying the event type, the app or process involved (via package names), and contextual metadata such as battery status, network connectivity, or user interactions.
 
-## Understanding the Data Structure
+## The red or blue pill?
 
-Before any analysis can begin, it’s crucial to understand how the data is organized. A typical Android logging dataset includes the following variables:
+Since the degree of preprocessing and thus the structure of app logging data can vary, we will look at two example cases. The first case is based on a data set that has already been preprocessed to a relatively high degree by a panel provider, thus providing a good introduction to some basic concepts in data analysis.
+
+We call this data set “blue” in a somewhat fitting reference to the blue pill in The Matrix.
+
+## The blue data set
+
+Before any analysis can begin, it’s crucial to understand how the data is organized. A typical more processed Android logging dataset includes the following variables:
+
+*panelist_id* – unique identifier for each user or device
+
+*date* – the date of the recorded event
+
+*start_time* - a timestamp indicating the start of an application
+
+*end_time* - a timestamp indicating the end of an application
+
+*duration* - the usage duration (in seconds or milliseconds) of the application
+
+*app_name* – readable name of the application
+
+*app_package* – the app’s identifier
+
+**Note:** The variable names as well as the structure of your data set can vary based on the level of preprocessing and tracking app used.
+
+### Common Dimensions of Analysis
+
+We will use the blue dataset to familiarize you with some conceptual decisions. However, in the course of the tutorial, we will use the red dataset more to demonstrate the computational steps of data preparation. Nevertheless, these forthcoming conceptual decisions are also relevant for the red dataset.
+
+To make sense of app log data, analysts typically view it through several dimensions of analysis:
+
+*Person-level* – patterns and metrics aggregated per individual or group.
+
+*Temporal* – analyses over time (hourly, daily, weekly trends).
+
+*App-level* – comparisons across apps (WhatsApp vs. Telegram) or app categories (Entertainment vs. Shopping).
+
+*Combined perspectives* – mixing dimensions, such as app use over time or per user.
+
+These general dimensions of comparison run through the entire analysis. Accordingly, it is important to consider at the beginning of the analysis what the results should show and on which of the dimensions of comparison they are based.
+
+However, before we go through some examples of analyses, our data must undergo several preprocessing steps, even though it is already very well processed.
+
+### Preprocessing the Blue Data Set
+
+Raw log data often contains a large amount of noise from background processes and system apps that do not represent active user behavior. In this step, we focus on data cleaning and filtering, including:
+
+*Removing background apps* – exclude system processes or apps running without direct user engagement.
+
+*Merge consecutive visits to the same app* - sometimes apps are interrupted by system apps, which leads to a technical artifact that appears as a new app visit. To prevent these from being misinterpreted as human behavior (e.g., as intentional app access), these cases are removed.
+
+*Blacklisting apps* – recode apps that are irrelevant to the research question and are potential sensitive (e.g., health apps, banking, etc.).
+
+This ensures that further analysis is based on intentional user interactions rather than passive device operations.
+
+```{r}
+background_apps = read.csv("data/background_system_packages.csv")
+```
+
+Let's import our dataset.
+
+```{r import data}
+blue_data = readRDS("data/blue_data.rds") 
+```
+
+And have a quick look.
+
+```{r}
+glimpse(blue_data)
+```
+```{r}
+blue_data_clean = blue_data %>% 
+  # first: let's make sure that there are no background apps in our data set
+  filter(!app_package %in% background_apps$pcn)
+  # second: remove consecutive visits
+
+  # third: blacklist apps
+```
+
+### Calculating Visits
+
+A visit represents a unit of exposure, such as a discrete instance of app use. Establishing a robust visit definition ensures consistent measurement of usage frequency across data sets and users. 
+
+Let's stick to the dimensions we're using for comparison. We are interested in the top 10 most-visited apps in our sample (dimension = app level).
+
+```{r}
+most_visited_apps = blue_data_clean %>% 
+  # group by application
+  group_by(app_name) %>% 
+  # summarise the total number of visits for each application
+  summarise(
+    visit = n()
+  ) %>% 
+  # sort in descending order
+  arrange(desc(visit)) %>% 
+  # select the top 10 rows
+  head(n = 10) 
+most_visited_apps
+```
+
+A table is nice but a plot is better. Let's visualize our findings using ggplot.
+
+```{r}
+plot1 = ggplot(most_visited_apps, aes(x = reorder(app_name, visit), y = visit)) +
+  geom_col(width = 0.6, fill = "#81A1C1") +
+  coord_flip() +
+  geom_text(aes(label = visit), hjust = -0.2, size = 3, family = "Times New Roman") +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.15))) +
+  theme_minimal(base_size = 13, base_family = "Times New Roman") +
+  theme(
+    legend.position = "none",
+    plot.title = element_text(face = "bold", size = 14, family = "Times New Roman"),
+    axis.text.y = element_text(family = "Times New Roman"),
+    axis.text.x = element_text(family = "Times New Roman")
+  ) +
+  labs(
+    title = "Top 10 most used apps",
+    x = "App Name",
+    y = "Visits"
+  )
+
+plot1
+```
+
+### Calculating Duration
+
+Duration reflects how long a user is exposed to an app or activity. It is another vital form of exposure that complements visit counts.
+
+Therefore we need to derive start_time, stop_time and the duration for each event, which is already done in our nice blue data set.
+
+This enables us calculate the duration per app and aggregate it over time. This can include overall smartphone duration, app-specific duration (e.g., Instagram), and temporal patterns of duration. Duration metrics reveal not only how often apps are used, but how much attention they receive.
+
+```{r}
+most_used_apps = blue_data_clean %>% 
+  # group by application
+  group_by(app_name) %>% 
+  # summarise the total number of visits for each application
+  summarise(
+    duration = round(sum(duration, na.rm = TRUE) / 60, digits = 2) # we divide by 60 to get minutes and round the result
+  ) %>% 
+  # sort in descending order
+  arrange(desc(duration)) %>% 
+  # select the top 10 rows
+  head(n = 10) 
+most_used_apps
+```
+
+Let's plot this again.
+
+```{r}
+plot2 = ggplot(most_used_apps, aes(x = reorder(app_name, duration), y = duration)) +
+  geom_col(width = 0.6, fill = "#81A1C1") +
+  coord_flip() +
+  geom_text(aes(label = duration), hjust = -0.2, size = 3, family = "Times New Roman") +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.15))) +
+  theme_minimal(base_size = 13, base_family = "Times New Roman") +
+  theme(
+    legend.position = "none",
+    plot.title = element_text(face = "bold", size = 14, family = "Times New Roman"),
+    axis.text.y = element_text(family = "Times New Roman"),
+    axis.text.x = element_text(family = "Times New Roman")
+  ) +
+  labs(
+    title = "Top 10 most used apps",
+    x = "App Name",
+    y = "Duration in minutes"
+  )
+
+plot2
+```
+### Extracting Sequences and Sessions of Mobile Behavior
+
+User behavior unfolds as sequences of events—actions that occur in a specific order over time.
+
+In this section, we introduce three key concepts:
+
+*Event* – a single recorded action (e.g., app foregrounding).
+
+*Sequence* – a meaningful order of multiple events (e.g., unlocking phone → opening Instagram → switching to Messages).
+
+*Session* – as defined by Peng et al. (20XX), a sequence of events with a defined duration that represents a coherent unit of mobile behavior.
+
+By identifying and analyzing sessions, we can capture the flow and structure of smartphone interaction, moving beyond isolated events to behavioral patterns.
+
+
+
+## The red data set
+
+We have already learned about some concepts for analyzing app logging data and applied them to a relatively well-prepared "blue" data set.
+
+However, not all app logging data sets look like this. Accordingly, I invite you to take the red pill and take a deeper look into the more or less messy reality.
+
+First, let's take a look at our data structure.
 
 *panelist_id* – unique identifier for each user or device
 
@@ -114,89 +312,52 @@ Before any analysis can begin, it’s crucial to understand how the data is orga
 
 Understanding this schema helps ensure that all subsequent preprocessing and analysis steps are properly aligned with the data’s meaning.
 
-Let's import our dataset.
-```{r import data}
-raw_data = readRDS("data/raw_data_A.rds") 
-```
+Let's take a closer look at the event_types. Here, we can refer to the article by Parry & Toth (2025) or the official [Android Developers Documentation](https://developer.android.com/reference/android/app/usage/UsageEvents.Event#constants_1), which breaks down the meaning of each type.
 
-
-```{r}
-glimpse(raw_data)
-```
-## Preprocessing the Data
-
-Raw log data often contains a large amount of noise from background processes and system apps that do not represent active user behavior.
-In this step, we focus on data cleaning and filtering, including:
-
-*Removing background apps* – exclude system processes or apps running without direct user engagement.
-
-*Merge consecutive visits to the same app* - sometimes apps are interrupted by system apps, which leads to a technical artifact that appears as a new app visit. To prevent these from being misinterpreted as human behavior (e.g., as intentional app access), these cases are removed.
-
-*Blacklisting apps* – recode apps that are irrelevant to the research question and are potential sensitive (e.g., health apps, banking, etc.).
-
-This ensures that further analysis is based on intentional user interactions rather than passive device operations.
+| Event Type | Name | Explanation |
+|-----------------|-----------------|---------------------------------------|
+| 1 | Activity resumed | An activity (associated with a package and class) moved to the foreground. This constant was deprecated in API level 29. |
+| 2 | Activity paused | An activity moved to the background. |
+| 5 | Configuration change | The device configuration has changed. |
+| 8 | Shortcut invocation | A shortcut created by the user (e.g., via the home screen or app shortcuts) was executed. You have created a shortcut for “WhatsApp Chat with Miriam” in your favorite apps bar. |
+| 15 | Screen interactive | The screen went into an interactive state (i.e., turned on for full user interaction, not ambient display or other non‑interactive state) |
+| 16 | Screen non‑interactive | The screen went into a non‑interactive state (i.e., completely turned off or turned on only in a non‑interactive state) |
+| 17 | Keyguard shown | The screen’s keyguard was shown |
+| 18 | Keyguard hidden | The screen’s keyguard was hidden (i.e., the user unlocked the device) |
+| 19 | Foreground service start | An app starts a so-called foreground service. This is a background service that is so important that Android must display a permanent notification to the user. Example: "Spotify is currently playing music" |
+| 20 | Foreground service stop | The running foreground service is stopped. The app no longer needs the persistent activity. |
+| 23 | Activity stopped | An activity becomes invisible on the UI. |
+| 26 | Device shutdown | The Android runtime underwent a shutdown process. |
+| 27 | Device startup | The Android runtime launched. |
 
 ```{r}
-app_packages = read.csv("../data/package_app_names.csv")
-background_apps = read.csv("../data/background_system_packages.csv")
+clean_data = raw_data %>% 
+  # we start by adding a more readable form of the event_type column 
+  mutate(
+    event_type_read = case_when(
+      event_type == 1  ~ "Activity resumed",
+      event_type == 2  ~ "Activity paused",
+      event_type == 5  ~ "Configuration change",
+      event_type == 8  ~ "Shortcut invocation",
+      event_type == 15 ~ "Screen turned on (interactive)",
+      event_type == 16 ~ "Screen turned off (non-interactive)",
+      event_type == 17 ~ "Keyguard shown",
+      event_type == 18 ~ "Keyguard hidden (device unlocked)",
+      event_type == 19 ~ "Foreground service started",
+      event_type == 20 ~ "Foreground service stopped",
+      event_type == 23 ~ "Activity stopped",
+      event_type == 26 ~ "Device shutdown",
+      event_type == 27 ~ "Device startup",
+      .default = NA
+    )
+  ) %>% 
+  # let's reorder our columns real quick
+  select(panelist_id, date, seen_timestamp, event_type, event_type_read, app_name, full_package_name, package_name) %>% 
+  # remove background apps | NOTE: The order of the preprocessing is important!
+  filter(!package_name %in% background_apps$pcn) 
+  # remove consecutive visits
+  
 ```
-
-## Common Dimensions of Analysis
-
-To make sense of app log data, analysts typically view it through several dimensions of analysis:
-
-*Person-level* – patterns and metrics aggregated per individual or group.
-
-*Temporal* – analyses over time (hourly, daily, weekly trends).
-
-*App-level* – comparisons across apps or app categories.
-
-*Combined perspectives* – mixing dimensions, such as app use over time or per user.
-
-These dimensions frame the data exploration process and help translate raw logs into meaningful behavioral indicators.
-
-## Calculating Visits
-
-A visit represents a unit of exposure, such as a discrete instance of app use.
-
-To calculate visits, analysts define specific rules, such as when an app is opened and closed, and count occurrences accordingly. Examples include:
-
-*Overall smartphone visits* – total number of app interactions.
-
-*App-specific visits* – e.g., number of Instagram visits.
-
-*Visits over time* – temporal patterns of app openings (by hour, day, or week).
-
-Establishing a robust visit definition ensures consistent measurement of usage frequency across datasets and users.
-
-## Calculating Duration
-
-Duration reflects how long a user is exposed to an app or activity. It is another vital form of exposure that complements visit counts.
-
-Key steps include:
-
-Deriving start_time and stop_time for each event.
-
-Calculating duration per event and aggregating over time.
-
-Measuring overall smartphone duration, app-specific duration (e.g., Instagram), and temporal patterns of duration.
-
-Duration metrics reveal not only how often apps are used, but how much attention they receive.
-
-## Extracting Sequences and Sessions of Mobile Behavior
-
-User behavior unfolds as sequences of events—actions that occur in a specific order over time.
-
-In this section, we introduce three key concepts:
-
-*Event* – a single recorded action (e.g., app foregrounding).
-
-*Sequence* – a meaningful order of multiple events (e.g., unlocking phone → opening Instagram → switching to Messages).
-
-*Session* – as defined by Peng et al., a sequence of events with a defined duration that represents a coherent unit of mobile behavior.
-
-By identifying and analyzing sessions, we can capture the flow and structure of smartphone interaction, moving beyond isolated events to behavioral patterns.
-
 
 <!-- End -->
 
