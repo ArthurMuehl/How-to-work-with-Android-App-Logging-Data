@@ -62,9 +62,10 @@ install.packages("dplyr")
 install.packages("lubridate")
 install.packages("purrr")
 install.packages("tidyr")
-install.packages("webtrackR")
+install.packages("kableExtra")
 install.packages("ggplot2")
 install.packages("nord")
+install.packages("extrafont")
 ```
 
 And load the R packages.
