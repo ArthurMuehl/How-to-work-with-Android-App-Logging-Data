@@ -1,0 +1,138 @@
+---
+title: "blacklisted_apps"
+author: "Patrick Zerrer"
+format: html
+editor: 
+  markdown: 
+    wrap: sentence
+---
+
+## Blacklisted Apps
+
+There are several options how to create a blacklist for sensitve apps.
+I don't want to go in to much detail here.
+Therefore, I will simply explain my approach to this tutorial.
+
+**Definition of sensitive Apps for this tutorial:**
+
+Sensitive apps are applications whose use allows conclusions to be drawn about particularly sensitive, intimate, or potentially stigmatizing areas of a person's life.
+They are blacklisted in the context of data collection or analysis in order to ensure privacy protection and avoid the processing of particularly sensitive personal data.
+
+These sensitive areas of life include in particular: 
+
+1.  Dating & sexuality Apps that provide information about intimate relationships, sexual orientation, or partnership behavior.
+    Examples: Tinder, Grindr, Bumble, Lovoo.
+
+2.  Health & physical condition Apps that reveal medical information, mental health, or physical conditions.
+    Examples: Fitness trackers, cycle apps, meditation apps, symptom checkers, diet apps.
+
+3.  Finances & Income Apps that allow conclusions to be drawn about financial situation, assets, income, or debts.
+    Examples: Banking apps, investment apps, tax apps, debt management.
+
+4.  Religion & Worldview Apps that reveal religious affiliation or spiritual practices.
+    Examples: Bible apps, prayer apps, religious community platforms.
+
+5.  Political orientation Apps that reveal political views, party affiliation, or activism.
+    Examples: Party apps, election tools, activism platforms.
+
+6.  Security & identity management Apps whose use involves particularly sensitive identity characteristics.
+    Examples: Password managers, authenticator apps, encrypted communication apps.
+
+7.  Communication in protected spaces Apps used for anonymous or confidential counseling.
+    Examples: Addiction counseling, psychological counseling, crisis hotlines.
+
+```{r}
+library(dplyr)
+library(httr)
+library(jsonlite)
+library(tidyr)
+library(klaus)
+```
+
+
+```{r import data}
+blue_data = readRDS("data/blue_data.rds") 
+```
+
+```{r}
+# Let's get every app in our data set
+distinct_apps = blue_data %>% 
+  select(app_name, app_package) %>% 
+  # just keep distinct rows
+  distinct() %>% 
+  # create variable for later labeling
+  mutate(
+    apps_for_labeling = paste0("app name: ", app_name, " app package: ", app_package) 
+  )
+```
+
+
+I am aware that LLMs contain systematic biases. Accordingly, I would advise against using these tools for such tasks without careful consideration and further review.
+
+Now, I will go through the labels provided by the LLM and check them and make adjustment if necessary. By the end of this process, I will have a list of sensitive apps, which I can use to replace the app names and packages in my data set.
+
+```{r}
+data_to_code = distinct_apps %>% 
+  mutate(
+    text = apps_for_labeling
+  )
+
+general_instructions = "You are a highly accurate and consistent text classification model specialized in analyzing Android App Names and Packages. You will receive the name of an app and, if applicable, the associated app package.Analyze whether the app falls into a particularly sensitive area.
+Sensitive apps are those whose use allows conclusions to be drawn about particularly sensitive, intimate, or potentially stigmatizing areas of a person's life. These include in particular:
+Dating & sexuality – References to intimate relationships, sexual orientation, or partnership behavior.
+Health & physical condition – Medical information, mental health, or physical conditions.
+Finances & income – Financial situation, assets, income, or debts.
+Religion & worldview – Religious affiliation or spiritual practices.
+Political orientation – Political stance, party affiliation, or activism.
+Security & identity management – Use of password managers, authenticator apps, encrypted communication.
+Confidential communication – Apps for anonymous or protected counseling (psychological counseling, addiction counseling, crisis hotlines).
+
+Examples of sensitive apps: Tinder, Grindr, Bumble, Lovoo, fitness trackers, Clue, MyFitnessPal, banking apps, PayPal, Bible apps, authenticator apps, encrypted messengers. 
+
+Instructions for classification:
+- Assign **exactly one category** to each App post based on the **primary focus** of the app.  
+- Always return valid JSON with the following structure:"
+
+formatting_instructions = "Always return a single JSON object for each coded text with the category name as the key. The value should be an object containing a 'label' key and a single value among multiple options. Each JSON object should have the following structure:"
+
+codebook = data.frame(
+  category = c("Sensitive App", 
+               "Sensitive App"
+               ), 
+  label = c("YES", "NO"),
+  instructions = c("Label the app as YES if the app falls into one of the above categories.",
+                   "Label the app as NO if the app does not falls into one of the above categories.")
+  )
+
+apps_labeled_by_gpt_oss12b = code_content(data_to_code, 
+                                          general_instructions, 
+                                          formatting_instructions, 
+                                          codebook,
+                                          provider = "chatai",
+                                          model = "openai-gpt-oss-120b")
+```
+
+In my case, I critically review the results of the LLM manually and correct any errors.
+
+```{r}
+blacklisted_apps = apps_labeled_by_gpt_oss12b %>% 
+  mutate(
+    # add your manual adjustments
+    label = case_when(app_name == "WhatsApp" ~ "NO",
+                      app_name == "Telegram" ~ "NO",
+                      app_name == "Murmuras" ~ "YES",
+                      .default = label)
+  ) %>% 
+  filter(label == "YES") %>% 
+  mutate(
+    blacklisted_app = paste0("blacklisted_", row_number())
+  ) %>% 
+  select(
+    - text,
+    - apps_for_labeling,
+    - category,
+    - label
+  )
+
+saveRDS(blacklisted_apps, file = "data/blacklisted_apps.rds")
+```

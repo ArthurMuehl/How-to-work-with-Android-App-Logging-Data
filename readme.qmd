@@ -154,12 +154,11 @@ Raw log data often contains a large amount of noise from background processes an
 
 *Merge consecutive visits to the same app* - sometimes apps are interrupted by system apps, which leads to a technical artifact that appears as a new app visit. To prevent these from being misinterpreted as human behavior (e.g., as intentional app access), these cases are removed.
 
-*Blacklisting apps* – recode apps that are irrelevant to the research question and are potential sensitive (e.g., health apps, banking, etc.).
-
-This ensures that further analysis is based on intentional user interactions rather than passive device operations.
+*Blacklisting apps* – recode apps that are irrelevant to the research question and are potential sensitive (e.g., health apps, banking, etc.). I have prepared a preliminary list of blacklisted apps for this tutorial. You can find the script for this on GitHub (blacklisted_apps.qmd). 
 
 ```{r}
-background_apps = read.csv("data/background_system_packages.csv")
+background_apps = read.csv("data/background_system_packages.csv") # based on Parry & Toth (2025) with some smaller extensions
+blacklisted_apps = readRDS("data/blacklisted_apps.rds") %>% select(-app_package)
 ```
 
 Let's import our dataset.
@@ -173,18 +172,71 @@ And have a quick look.
 ```{r}
 glimpse(blue_data)
 ```
+
 ```{r}
 blue_data_clean = blue_data %>% 
-  # first: let's make sure that there are no background apps in our data set
-  filter(!app_package %in% background_apps$pcn)
-  # second: remove consecutive visits
-
-  # third: blacklist apps
+  # let's make sure that there are no background apps in our data set
+  filter(!app_package %in% background_apps$pcn) %>% 
+  # convert start_time and end_time to proper datetime format, make sure to choose the correct timezone (tz)
+  mutate(
+    start_time = as.POSIXct(start_time, format = "%Y-%m-%d %H:%M:%S", tz = "Europe/Berlin"),
+    end_time   = as.POSIXct(end_time,   format = "%Y-%m-%d %H:%M:%S", tz = "Europe/Berlin")
+  ) %>% 
+  # we need to sort our rows in the correct temporal order
+  # make sure that you group by participant to avoid sorting across all participants
+  group_by(panelist_id) %>% 
+  # make sure that you take the grouping into account, when you sort your data
+  arrange(desc(start_time), .by_group = TRUE) %>% 
+  # it is important that you use lag() or lead() based on your sorting (descending or ascending)
+  mutate(
+    # we use the 'next_panelist_id' variable to ensure that participants are not mixed up by accident.
+    next_panelist_id = lag(panelist_id, n = 1L),
+    # we use the 'next_app_name' to identify potential consecutive app visits
+    next_app_name = lag(app_name, n = 1L),
+    # we need the 'next_start_time' to calculate the time_gap between events
+    next_start_time = lag(start_time, n = 1L),
+    # we calculate the time_gap in seconds
+    time_gap = as.numeric(next_start_time - end_time, units = "secs"),
+    # we use 'previous_start_time' to replace 'start_time' with the new correct timestamp if we merge consecutive app visits
+    previous_start_time = lead(start_time, n = 1L)
+  ) %>% 
+  mutate(
+    # we use a filter variable to identify consecutive app visits, which we can remove later
+    # conditions are:
+    # - panelist_id and next_panelist_id are identical
+    # - app_name and next_app_name are identical
+    # - time_gap equals 0
+    filter_var = if_else((panelist_id == next_panelist_id & app_name == next_app_name & time_gap == 0), "remove", "keep"),
+    # I like to keep an column indicating that I changed something, therefore I create 'rows_merged'
+    rows_merged = if_else((lead(filter_var)) == "remove", "Yes", "No"),
+    # replace 'start_time' with 'previous_start_time' for relevant rows 
+    start_time = if_else(filter_var == "keep" & rows_merged == "Yes", as_datetime(previous_start_time), as_datetime(start_time)),
+    # replace 'duration' with the updated duration for relevant rows
+    duration = if_else(filter_var == "keep" & rows_merged == "Yes", as.numeric(end_time - start_time, units = "secs"), duration)
+  ) %>% 
+  # remove consecutive visits
+  filter(filter_var == "keep") %>% 
+  # I suggest replacing sensitive apps in your dataset to strengthen anonymisation
+  # replace 'app_names' based on our blacklisted apps
+  left_join(blacklisted_apps, by = "app_name") %>% 
+  mutate(
+    app_name = if_else(!is.na(blacklisted_app), blacklisted_app, app_name),
+    app_package = if_else(!is.na(blacklisted_app), "blacklsited_package", app_package)
+  ) %>% 
+  select(-blacklisted_app)
 ```
+
+Okay, we are done with our preprocessing of the blue data set. Let's have a quick look.
+
+```{r}
+glimpse(blue_data_clean)
+```
+
+Alright, we are ready for some analysis.
 
 ### Calculating Visits
 
-A visit represents a unit of exposure, such as a discrete instance of app use. Establishing a robust visit definition ensures consistent measurement of usage frequency across data sets and users. 
+A visit represents a unit of exposure, such as a discrete instance of app use. Establishing a robust visit definition ensures consistent measurement of usage frequency across data sets and users.
 
 Let's stick to the dimensions we're using for comparison. We are interested in the top 10 most-visited apps in our sample (dimension = app level).
 
@@ -207,7 +259,7 @@ A table is nice but a plot is better. Let's visualize our findings using ggplot.
 
 ```{r}
 plot1 = ggplot(most_visited_apps, aes(x = reorder(app_name, visit), y = visit)) +
-  geom_col(width = 0.6, fill = "#81A1C1") +
+  geom_col(width = 0.6, fill = "#5E81AC") +
   coord_flip() +
   geom_text(aes(label = visit), hjust = -0.2, size = 3, family = "Times New Roman") +
   scale_y_continuous(expand = expansion(mult = c(0, 0.15))) +
@@ -220,6 +272,7 @@ plot1 = ggplot(most_visited_apps, aes(x = reorder(app_name, visit), y = visit)) 
   ) +
   labs(
     title = "Top 10 most used apps",
+    subtitle = "Data based on a Sample of German Internet Users (N = XXX)",
     x = "App Name",
     y = "Visits"
   )
@@ -254,7 +307,7 @@ Let's plot this again.
 
 ```{r}
 plot2 = ggplot(most_used_apps, aes(x = reorder(app_name, duration), y = duration)) +
-  geom_col(width = 0.6, fill = "#81A1C1") +
+  geom_col(width = 0.6, fill = "#5E81AC") +
   coord_flip() +
   geom_text(aes(label = duration), hjust = -0.2, size = 3, family = "Times New Roman") +
   scale_y_continuous(expand = expansion(mult = c(0, 0.15))) +
@@ -267,13 +320,164 @@ plot2 = ggplot(most_used_apps, aes(x = reorder(app_name, duration), y = duration
   ) +
   labs(
     title = "Top 10 most used apps",
+    subtitle = "Data based on a Sample of German Internet Users (N = XXX)",
     x = "App Name",
     y = "Duration in minutes"
   )
 
 plot2
 ```
-### Extracting Sequences and Sessions of Mobile Behavior
+
+### Mobile Behavior between participants
+
+In my opinion, the phenomenon of extremely skewed distribution is important for understanding the structure of digital behavioral data in general and app usage data in particular. The use of apps or smartphones varies greatly between the individuals observed and between time units. This becomes particularly important when location parameters or other statistical measures or calculations are performed.
+
+Let's take a quick look at this using Instagram usage as an example.
+
+```{r}
+instagram_participants = blue_data_clean %>% 
+  # filter for Instagram usage
+  filter(app_name == "Instagram") %>% 
+  # group by participants 
+  group_by(panelist_id) %>% 
+  summarise(
+    # calculate vistis to Instagram
+    visits = n(),
+    # and usage time
+    duration = sum(duration, na.rm = TRUE)
+  ) %>% 
+  pivot_longer(
+    cols = c(visits, duration),
+    names_to = "metric",
+    values_to = "value"
+  )
+```
+```{r}
+plot3 = ggplot(instagram_participants, aes(x = metric, y = value, fill = metric)) +
+  geom_violin(trim = FALSE, alpha = 0.6) +
+  geom_boxplot(width = 0.2, outlier.size = 0.8, alpha = 0.9) +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.15))) +
+  scale_fill_manual(
+    values = c("visits" = "#5E81AC", "duration" = "#BF616A"),
+    labels = c("Visits", "Duration (minutes)")
+  ) +
+  facet_wrap(~ metric, scales = "free") +
+  theme_minimal(base_size = 13, base_family = "Times New Roman") +
+  theme(
+    legend.position = "none",
+    strip.text = element_text(face = "bold", size = 12),
+    plot.title = element_text(face = "bold")
+  ) +
+  labs(
+    title = "Instagram Visits and Duration per Participant",
+    subtitle = "Data based on a Sample of German Internet Users (N = XXX)",
+    x = "",
+    y = "Value"
+  )
+
+plot3
+```
+The large variance in the data is clearly evident here. The same applies to the occurrence of extreme values. This skewed distribution is also reflected in the widely differing values for the median and the mean. Against this background, the distribution of the app tracking data should be taken into account when selecting the parameters to be calculated (mean, median, etc.).
+
+### Mobile Behavior over time
+
+One of the biggest advantages of mobile tracking data is the high temporal granularity of our data. Every event, such as opening an app, is assigned a very precise timestamp (usually even in milliseconds). This allows us to view recorded user behavior over different time periods.
+
+Our blue test data set covers a total of one week. Let's take a look at Instagram usage during that week.
+
+```{r}
+instagram_week = blue_data_clean %>% 
+  filter(app_name == "Instagram") %>% 
+  group_by(date) %>% 
+  summarise(
+    visits = n(),
+    duration = sum(duration, na.rm = TRUE) / 60 # in minutes
+  ) %>% 
+  pivot_longer(cols = c(visits, duration),
+               names_to = "metric",
+               values_to = "value")
+
+plot3 = ggplot(instagram_week, aes(x = date, y = value, color = metric)) +
+  geom_line(linewidth = 1) +
+  geom_point(size = 2) +
+  scale_color_manual(
+    values = c("visits" = "#5E81AC", "duration" = "#BF616A"),
+    labels = c("Visits", "Duration (minutes)")
+  ) +
+  scale_x_date(date_breaks = "1 day",
+               date_labels = "%d.%m") +
+  theme_minimal(base_size = 13, base_family = "Times New Roman") +
+  theme(
+    legend.title = element_blank(),
+    legend.position = "top",
+    plot.title = element_text(face = "bold"),
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  ) +
+  labs(
+    title = "Instagram usage over a week",
+    subtitle = "Data based on a Sample of German Internet Users (N = XXX)",
+    x = "Date",
+    y = "Value"
+  )
+
+plot3
+```
+Okay, that gives us a pretty good overview of Instagram usage over the course of the week. Now, of course, we can also select other time periods and take a closer look at them. Let's take a look at Instagram usage over the course of a day.
+
+```{r}
+# Let's select a random day in our sample
+random_day = blue_data_clean %>% 
+  select(date) %>% 
+  distinct() %>% 
+  slice_sample(n = 1) %>% 
+  pull(date)
+
+instagram_day = blue_data_clean %>% 
+  # we filter our data based on the previously selected random day and Instagram
+  filter(app_name == "Instagram" & date == random_day) %>% 
+  # we need the hour of the day for our analysis
+  mutate(
+    # let's make sure that we have the right timezone
+    hour = as.POSIXct(start_time, tz = "Europe/Berlin"),
+    # and round the timestamps to hours
+    hour = floor_date(hour, unit = "hour")
+  ) %>% 
+  group_by(hour) %>% 
+  summarise(
+    visits = n(),
+    # Note: The accumulated duration may exceed one hour, as we perform the calculation for several people and do not include the end time.
+    duration = sum(duration, na.rm = TRUE) / 60 # in minutes
+  ) %>% 
+  pivot_longer(cols = c(visits, duration),
+               names_to = "metric",
+               values_to = "value")
+
+plot4 = ggplot(instagram_day, aes(x = hour, y = value, color = metric)) +
+  geom_line(linewidth = 1) +
+  geom_point(size = 2) +
+  scale_color_manual(
+    values = c("visits" = "#5E81AC", "duration" = "#BF616A"),
+    labels = c("Visits", "Duration (minutes)")
+  ) +
+  scale_x_datetime(date_breaks = "1 hour",
+                   date_labels = "%H:%M") +
+  theme_minimal(base_size = 13, base_family = "Times New Roman") +
+  theme(
+    legend.title = element_blank(),
+    legend.position = "top",
+    plot.title = element_text(face = "bold"),
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  ) +
+  labs(
+    title = "Instagram usage over the course of a day",
+    subtitle = "Data based on a Sample of German Internet Users (N = XXX)",
+    x = "Time",
+    y = "Value"
+  )
+
+plot4
+```
+That looks good. However, we can go into even greater detail. Let's say we are interested in usage behavior in the mobile situation in which Instagram is used. Specifically, how long does the person use their smartphone and which apps are used before and after? To do this, we first need to consider a few conceptual issues.
 
 User behavior unfolds as sequences of events—actions that occur in a specific order over time.
 
@@ -287,7 +491,128 @@ In this section, we introduce three key concepts:
 
 By identifying and analyzing sessions, we can capture the flow and structure of smartphone interaction, moving beyond isolated events to behavioral patterns.
 
+```{r}
+sessions = blue_data_clean %>% 
+  # first, we need to identify sesssions
+  # new sessions starts, if 
+  # - gap > 60 seconds or
+  # - panelist_id does not equal next_panelist
+  mutate(
+    new_session = if_else(
+      row_number() == 1 | time_gap > 60 | panelist_id != next_panelist_id,
+      1, 0
+    ),
+    session_id = paste0(panelist_id, "_", cumsum(new_session))
+  ) 
 
+# we create a df which contains all session_ids and the number of instagram visits 
+instagram_visits = sessions %>% 
+  group_by(session_id) %>% 
+  summarise(
+    # calculate total visits per session
+    total_visits = n(),
+    # calculate Instagram visits per session
+    instagram_visits = sum(app_name == "Instagram")
+  ) %>% 
+  # just keep sessions with at least one instagram visit
+  filter(instagram_visits > 0)
+
+# let's filter our sessions based on 'instagram_visits' to get the whole usage sequence
+instagram_sessions = sessions %>% 
+  filter(session_id %in% instagram_visits$session_id)
+
+# okay, let's say we want to visualize one specific instagram session, to get a better idea about the context etc.
+# select a random session
+random_session = instagram_sessions %>% 
+  # We want something which is nice to visualize. Therefore we limit our sample for the random draw to sessions which have a certain duration
+  group_by(session_id) %>% 
+  summarise(
+    session_duration = sum(duration, na.rm = TRUE)
+  ) %>% 
+  filter(session_duration > 180 & session_duration < 360) %>% 
+  ungroup() %>% 
+  slice_sample(n = 1) %>% 
+  pull(session_id)
+
+instagram_visual = instagram_sessions %>% 
+  filter(session_id == random_session) %>%
+  select(app_name, start_time, end_time, duration, session_id)
+
+# I want to fill the temporal gaps between apps, therefore I need to calculate the gaps in between
+gaps = instagram_visual %>%
+  mutate(
+    next_start = lag(start_time),
+    gap_start  = end_time,
+    gap_end    = next_start
+  ) %>%
+  filter(!is.na(next_start) & gap_end > gap_start) %>%
+  mutate(
+    app_name = "GAP"
+  ) %>%
+  select(panelist_id, app_name, gap_start, gap_end, session_id) %>%
+  rename(
+    start_time = gap_start,
+    end_time   = gap_end
+  )
+
+# add the gap data to 'instagram_visual'
+instagram_visual = instagram_visual %>% 
+  bind_rows(gaps) %>% 
+  mutate(
+    app_name = as.character(app_name)
+  ) %>% 
+  mutate(bar_y = 1) 
+
+# get dynamic colors for each app, except for GAP which should be grey
+app_levels = unique(instagram_visual$app_name)
+apps_without_gap = setdiff(app_levels, "GAP")
+gap_color = c("GAP" = "#D8DEE9")
+
+colors =  c("#5E81AC", "#B48EAD", "#BF616A", "#D08770","#EBCB8B") 
+
+app_colors = setNames(
+  rep(colors, length.out = length(apps_without_gap)), apps_without_gap
+)
+
+color_map = c(gap_color, app_colors)
+
+plot5 = ggplot(instagram_visual) +
+  geom_segment(
+    aes(
+      y = bar_y,
+      yend = bar_y,
+      x = start_time,
+      xend = end_time,
+      color = app_name
+    ),
+    size = 20
+  ) +
+  scale_color_manual(values = color_map) +
+  scale_x_datetime(date_breaks = "20 secs",
+                   date_labels = "%H:%M:%S") +
+  labs(
+    x = "Time",
+    y = NULL,
+    title = "A random Instagram session on a Smartphone",
+  ) +
+  theme_minimal(base_size = 13, base_family = "Times New Roman") +
+  theme(
+    legend.title = element_blank(),
+    legend.position = "top",
+    plot.title = element_text(face = "bold"),
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    axis.text.y  = element_blank(),
+    axis.title.y = element_blank(),
+    axis.ticks.y = element_blank()
+  )
+
+plot5
+```
+Here we see the sequence of visited apps within the randomly selected session.
+
+We have now learned about some basic concepts and analyses of app tracking data using a relatively well-prepared data set.
+
+If you have such a data set, you can close your laptop at this point and be happy. If you want to continue, I would suggest taking a break now and then we'll look at the red data set. 
 
 ## The red data set
 
@@ -316,7 +641,7 @@ Understanding this schema helps ensure that all subsequent preprocessing and ana
 Let's take a closer look at the event_types. Here, we can refer to the article by Parry & Toth (2025) or the official [Android Developers Documentation](https://developer.android.com/reference/android/app/usage/UsageEvents.Event#constants_1), which breaks down the meaning of each type.
 
 | Event Type | Name | Explanation |
-|-----------------|-----------------|---------------------------------------|
+|------------------------|------------------------|------------------------|
 | 1 | Activity resumed | An activity (associated with a package and class) moved to the foreground. This constant was deprecated in API level 29. |
 | 2 | Activity paused | An activity moved to the background. |
 | 5 | Configuration change | The device configuration has changed. |
