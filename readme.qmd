@@ -81,6 +81,7 @@ require(ggplot2)
 require(nord)
 library(extrafont)
 library(forcats)
+library(stringr)
 ```
 
 ```{r}
@@ -163,7 +164,7 @@ Raw log data often contains a large amount of noise from background processes an
 
 ```{r}
 background_apps = read.csv("data/background_system_packages.csv") # based on Parry & Toth (2025) with some smaller extensions
-blacklisted_apps = readRDS("data/blacklisted_apps.rds") %>% select(-app_package)
+blacklisted_apps = readRDS("data/blacklisted_apps.rds") %>% select(-app_package) %>% distinct(app_name, .keep_all = TRUE)
 ```
 
 Let's import our dataset.
@@ -384,7 +385,8 @@ plot3 = ggplot(instagram_participants, aes(x = metric, y = value, fill = metric)
 
 plot3
 ```
-Okay, let's try to get a better idea of what's going on in our dataset. We will examine the data at an individual level and see how Instagram usage behaviour varies between our participants across days. As I am a very visual person, I prefer plots to tables. 
+
+Okay, let's try to get a better idea of what's going on in our dataset. We will examine the data at an individual level and see how Instagram usage behaviour varies between our participants across days. As I am a very visual person, I prefer plots to tables.
 
 ```{r}
 # TODO: Nutzungsverhalten über Zeit pro Nutzer in einem Plot für mehrere Nutzer. Soll die temporale variance zwischen Tagen und Nutzer zeigen. Mal bei Multilevel Analysen anschauen. Als Tipp für Data Exploration bevor die Analyse stattfindet
@@ -741,57 +743,395 @@ First, let's take a look at our data structure.
 
 Understanding this schema helps ensure that all subsequent preprocessing and analysis steps are properly aligned with the data’s meaning.
 
-Let's take a closer look at the event_types. Here, we can refer to the article by Parry & Toth (2025) or the official [Android Developers Documentation](https://developer.android.com/reference/android/app/usage/UsageEvents.Event#constants_1), which breaks down the meaning of each type.
+Let's take a closer look at the event_types. Here, we can refer to the article by Parry & Toth (2025), the official [Android Developers Documentation](https://developer.android.com/reference/android/app/usage/UsageEvents.Event#constants_1) or [Android Code Search](https://cs.android.com/?hl=de)(search for "UsageEvents"), which breaks down the meaning of each type.
 
-| Event Type | Name | Explanation |
-|------------------------|------------------------|------------------------|
-| 1 | Activity resumed | An activity (associated with a package and class) moved to the foreground. This constant was deprecated in API level 29. |
-| 2 | Activity paused | An activity moved to the background. |
-| 5 | Configuration change | The device configuration has changed. |
-| 8 | Shortcut invocation | A shortcut created by the user (e.g., via the home screen or app shortcuts) was executed. You have created a shortcut for “WhatsApp Chat with Miriam” in your favorite apps bar. |
-| 15 | Screen interactive | The screen went into an interactive state (i.e., turned on for full user interaction, not ambient display or other non‑interactive state) |
-| 16 | Screen non‑interactive | The screen went into a non‑interactive state (i.e., completely turned off or turned on only in a non‑interactive state) |
-| 17 | Keyguard shown | The screen’s keyguard was shown |
-| 18 | Keyguard hidden | The screen’s keyguard was hidden (i.e., the user unlocked the device) |
-| 19 | Foreground service start | An app starts a so-called foreground service. This is a background service that is so important that Android must display a permanent notification to the user. Example: "Spotify is currently playing music" |
-| 20 | Foreground service stop | The running foreground service is stopped. The app no longer needs the persistent activity. |
-| 23 | Activity stopped | An activity becomes invisible on the UI. |
-| 26 | Device shutdown | The Android runtime underwent a shutdown process. |
-| 27 | Device startup | The Android runtime launched. |
++------------+--------------------------------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| Event Type | Name                           | Explanation                                                                                                                                                                                                                                                |
++============+================================+============================================================================================================================================================================================================================================================+
+| 0          | NONE                           | A device level event like DEVICE_SHUTDOWN does not have package name, but some user code always expect a non-null for every event.                                                                                                                         |
++------------+--------------------------------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| 1          | Activity resumed               | An activity (associated with a package and class) moved to the foreground. This constant was deprecated in API level 29.                                                                                                                                   |
++------------+--------------------------------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| 2          | Activity paused                | An activity moved to the background.                                                                                                                                                                                                                       |
++------------+--------------------------------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| 3          | End of day                     | This is a technical note from the system at the end of the day. It indicates that the app was actively open on the screen at that time (usually midnight). The system automatically ended the recording for the day here to start a new statistics period. |
++------------+--------------------------------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| 4          | Continue previous day          | An event type denoting that a component was in the foreground the previous day. This is effectively treated as a ACTIVITY_RESUMED.                                                                                                                         |
++------------+--------------------------------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| 5          | Configuration change           | The device configuration has changed.                                                                                                                                                                                                                      |
++------------+--------------------------------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| 6          | System Interaction             | The system interacted in some way with the respective app.                                                                                                                                                                                                 |
++------------+--------------------------------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| 7          | User Interaction               | A user interacted in some way with the respective app.                                                                                                                                                                                                     |
++------------+--------------------------------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| 8          | Shortcut invocation            | A shortcut created by the user (e.g., via the home screen or app shortcuts) was executed. You have created a shortcut for “WhatsApp Chat with Miriam” in your favorite apps bar.                                                                           |
++------------+--------------------------------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| 9          | Chooser Activity               | This event means that the user has selected a specific app in the phone's native share menu to share a file, link, or information.                                                                                                                         |
++------------+--------------------------------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| 10         | Notification seen              | The user viewed the notification.                                                                                                                                                                                                                          |
++------------+--------------------------------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| 11         | Standby bucket changed         | Standalone component launched, such as widgets.                                                                                                                                                                                                            |
++------------+--------------------------------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| 12         | Interruptive notification      | An app posted an interruptive notification, which can include visual and audible interruptions, e.g. Push-Notifications of WhatsApp.                                                                                                                       |
++------------+--------------------------------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| 13         | Slice pinned priv              | The Home Screen app or voice assistant has saved or bookmarked a small, interactive element of an app (a “slice”) for quick access.                                                                                                                        |
++------------+--------------------------------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| 14         | Slice pinned                   | An app t has saved or bookmarked a small, interactive element of an app (a “slice”) for quick access.                                                                                                                                                      |
++------------+--------------------------------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| 15         | Screen interactive             | The screen went into an interactive state (i.e., turned on for full user interaction, not ambient display or other non‑interactive state)                                                                                                                  |
++------------+--------------------------------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| 16         | Screen non‑interactive         | The screen went into a non‑interactive state (i.e., completely turned off or turned on only in a non‑interactive state)                                                                                                                                    |
++------------+--------------------------------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| 17         | Keyguard shown                 | The screen’s keyguard was shown                                                                                                                                                                                                                            |
++------------+--------------------------------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| 18         | Keyguard hidden                | The screen’s keyguard was hidden (i.e., the user unlocked the device)                                                                                                                                                                                      |
++------------+--------------------------------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| 19         | Foreground service start       | An app starts a so-called foreground service. This is a background service that is so important that Android must display a permanent notification to the user. Example: "Spotify is currently playing music"                                              |
++------------+--------------------------------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| 20         | Foreground service stop        | The running foreground service is stopped. The app no longer needs the persistent activity.                                                                                                                                                                |
++------------+--------------------------------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| 21         | Continuning foreground service | An event type denoting that a foreground service is at started state when the stats rolled-over at the end of a time interval.                                                                                                                             |
++------------+--------------------------------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| 22         | Rollover foreground service    | An activity becomes invisible on the UI.                                                                                                                                                                                                                   |
++------------+--------------------------------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| 23         | Activity stopped               | An activity becomes invisible on the UI.                                                                                                                                                                                                                   |
++------------+--------------------------------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| 24         | Activity destroyed             | An activity object is destroyed.                                                                                                                                                                                                                           |
++------------+--------------------------------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| 25         | Flush to disk                  | An event type denoting that the Android runtime underwent a shutdown process.                                                                                                                                                                              |
++------------+--------------------------------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| 26         | Device shutdown                | The Android runtime underwent a shutdown process.                                                                                                                                                                                                          |
++------------+--------------------------------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| 27         | Device startup                 | The Android runtime launched.                                                                                                                                                                                                                              |
++------------+--------------------------------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| 28         | User unlocked                  | An event type denoting that a user has been unlocked for the first time. This event mainly indicates when the user's credential encrypted storage was first accessible.                                                                                    |
++------------+--------------------------------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| 29         | User stopped                   | An event type denoting that a user has been stopped. This typically happens when the system is being turned off or when users are being switched.                                                                                                          |
++------------+--------------------------------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| 30         | Locus ID set                   | This event type is an internal mechanism that is primarily used for functions such as smart suggestions or task continuation (app continuity).                                                                                                             |
+|            |                                |                                                                                                                                                                                                                                                            |
+|            |                                | In short: when you click on a specific channel in a chat, the app sets a new LocusId. If you later access it via Google search or the “Recently Used” menu, the system knows exactly which screen in the app to open thanks to this ID.                    |
++------------+--------------------------------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| 31         | App component used             | An event type denoting that a component in the package has been used.                                                                                                                                                                                      |
++------------+--------------------------------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+
+In order to get started, we first need our data.
 
 ```{r}
-clean_data = raw_data %>% 
+red_data = readRDS("data/red_data.rds")
+```
+
+Then let's take a quick look at the event types in our data.
+
+```{r}
+event_types = red_data %>% 
+  group_by(event_type) %>% 
+  summarise(
+    n = n()
+  ) %>% 
+  arrange(desc(n)) %>% 
+  kable()
+event_types
+```
+
+If we take a closer look, we see that there are some event types here that are not listed in the official Android documentation, e.g., event_type = 100. This can happen when manufacturers use a customized version of Android. For us, this means specifically that we do not know what event_type 100 stands for. I was also unable to find any reliable information on this. Welcome to the messy reality! Luckily these event types are not very frequent, therefore we ignore them for now.
+
+Nevertheless, we will first convert the event_types into a more readable form, at least those for which we have information available.
+
+```{r}
+red_coded = red_data %>% 
   # we start by adding a more readable form of the event_type column 
   mutate(
     event_type_read = case_when(
+      event_type == 0  ~ "None",
       event_type == 1  ~ "Activity resumed",
       event_type == 2  ~ "Activity paused",
+      event_type == 3  ~ "End of day",
+      event_type == 4  ~ "Continue previous day",
       event_type == 5  ~ "Configuration change",
+      event_type == 6  ~ "System Interaction",
+      event_type == 7  ~ "User Interaction",
       event_type == 8  ~ "Shortcut invocation",
+      event_type == 9  ~ "Chooser Activity (Share)",
+      event_type == 10 ~ "Notification seen",
+      event_type == 11 ~ "Standby bucket changed",
+      event_type == 12 ~ "Interruptive notification",
+      event_type == 13 ~ "Slice pinned priv",
+      event_type == 14 ~ "Slice pinned",
       event_type == 15 ~ "Screen turned on (interactive)",
       event_type == 16 ~ "Screen turned off (non-interactive)",
       event_type == 17 ~ "Keyguard shown",
       event_type == 18 ~ "Keyguard hidden (device unlocked)",
       event_type == 19 ~ "Foreground service started",
       event_type == 20 ~ "Foreground service stopped",
+      event_type == 21 ~ "Continuning foreground service",
+      event_type == 22 ~ "Rollover foreground service",
       event_type == 23 ~ "Activity stopped",
+      event_type == 24 ~ "Activity destroyed",
+      event_type == 25 ~ "Flush to disk",
       event_type == 26 ~ "Device shutdown",
       event_type == 27 ~ "Device startup",
+      event_type == 28 ~ "User unlocked",
+      event_type == 29 ~ "User stopped",
+      event_type == 30 ~ "Locus ID set",
+      event_type == 31 ~ "App component used",
       .default = NA
-    )
+    ),
+    event = case_when(
+      # Start / open / activate
+      event_type %in% c(1, 4, 7, 9, 11, 14, 15, 18, 19, 22, 24, 27) ~ "Start",
+      # Stop / pause / close / deactivate
+      event_type %in% c(2, 3, 10, 13, 16, 17, 20, 21, 23, 25, 26) ~ "Stop",
+      # System / configuration / meta data
+      event_type %in% c(5, 6, 8, 12, 28, 29, 30, 31) ~ "Meta/Config",
+      .default = NA_character_
+    ),
+    datetime = as_datetime(seen_timestamp / 1000)
   ) %>% 
   # let's reorder our columns real quick
-  select(panelist_id, date, seen_timestamp, event_type, event_type_read, app_name, full_package_name, package_name) %>% 
-  # remove background apps | NOTE: The order of the preprocessing is important!
-  filter(!package_name %in% background_apps$pcn) 
-  # remove consecutive visits
-  
+  select(panelist_id, date, datetime, seen_timestamp, event_type, event_type_read, event, app_name, full_package_name, package_name) %>% 
+  # remove background apps 
+  filter(!package_name %in% background_apps$pcn) %>% 
+  # group by panelist_id
+  group_by(panelist_id) %>% 
+  # sort rows in temporal order by participant
+  arrange(seen_timestamp, .by_group = TRUE)
 ```
+
+Our initial goal is to achieve a data structure like the one in the blue data set. To do this, we will initially focus only on the start and stop of apps.
+
+```{r}
+red_start_stop = red_coded %>% 
+  # we are not interested in the meta/config event_types, therefore we filter for start and stop 
+  filter(event %in% c("Start", "Stop")) %>% 
+  # we are using the same logic as before 
+  mutate(
+    next_event = lead(event, n = 1L),
+    next_timestamp = lead(seen_timestamp, n = 1L),
+    next_app = lead(app_name, n = 1L),
+    next_panelist = lead(panelist_id, n = 1L)
+  ) %>% 
+  filter(
+    event == "Start" & next_event == "Stop" & app_name == next_app & panelist_id == next_panelist
+  ) %>% 
+  # let's rename some variable for more convenience
+  rename(
+    start_timestamp = seen_timestamp,
+    stop_timestamp = next_timestamp
+  ) %>% 
+  # calculate duration in seconds
+  mutate(
+    duration = stop_timestamp - start_timestamp / 1000 # in seconds
+  ) %>% 
+  # select only relevant variables
+  select(
+    panelist_id,
+    date,
+    datetime,
+    start_timestamp,
+    stop_timestamp,
+    duration,
+    app_name,
+    package_name
+  ) %>% 
+  ungroup()
+```
+
+We have now reached an interim stage by recoding information about the start and stop of the respective apps for our own use. Now we perform the same preprocessing steps as for the blue data set.
+
+```{r}
+red_clean = red_start_stop %>% 
+  # convert start_time and end_time to proper datetime format, make sure to choose the correct timezone (tz)
+  mutate(
+    start_time = as.POSIXct(start_timestamp / 1000, format = "%Y-%m-%d %H:%M:%S", tz = "Europe/Berlin"),
+    end_time   = as.POSIXct(stop_timestamp / 1000,   format = "%Y-%m-%d %H:%M:%S", tz = "Europe/Berlin")
+  ) %>% 
+  # we need to sort our rows in the correct temporal order
+  # make sure that you group by participant to avoid sorting across all participants
+  group_by(panelist_id) %>% 
+  # make sure that you take the grouping into account, when you sort your data
+  arrange(desc(start_time), .by_group = TRUE) %>% 
+  # it is important that you use lag() or lead() based on your sorting (descending or ascending)
+  mutate(
+    # we use the 'next_panelist_id' variable to ensure that participants are not mixed up by accident.
+    next_panelist_id = lag(panelist_id, n = 1L),
+    # we use the 'next_app_name' to identify potential consecutive app visits
+    next_app_name = lag(app_name, n = 1L),
+    # we need the 'next_start_time' to calculate the time_gap between events
+    next_start_time = lag(start_time, n = 1L),
+    # we calculate the time_gap in seconds
+    time_gap = as.numeric(next_start_time - end_time, units = "secs"),
+    # we use 'previous_start_time' to replace 'start_time' with the new correct timestamp if we merge consecutive app visits
+    previous_start_time = lead(start_time, n = 1L)
+  ) %>% 
+  mutate(
+    # we use a filter variable to identify consecutive app visits, which we can remove later
+    # conditions are:
+    # - panelist_id and next_panelist_id are identical
+    # - app_name and next_app_name are identical
+    # - time_gap equals 0
+    filter_var = if_else((panelist_id == next_panelist_id & app_name == next_app_name & time_gap == 0), "remove", "keep"),
+    # I like to keep an column indicating that I changed something, therefore I create 'rows_merged'
+    rows_merged = if_else((lead(filter_var)) == "remove", "Yes", "No"),
+    # replace 'start_time' with 'previous_start_time' for relevant rows 
+    start_time = if_else(filter_var == "keep" & rows_merged == "Yes", as_datetime(previous_start_time), as_datetime(start_time)),
+    # replace 'duration' with the updated duration for relevant rows
+    duration = if_else(filter_var == "keep" & rows_merged == "Yes", as.numeric(end_time - start_time, units = "secs"), duration)
+  ) %>% 
+  # remove consecutive visits
+  filter(filter_var == "keep") %>% 
+  # I suggest replacing sensitive apps in your dataset to strengthen anonymisation
+  # replace 'app_names' based on our blacklisted apps
+  left_join(blacklisted_apps, by = "app_name") %>% 
+  mutate(
+    app_name = if_else(!is.na(blacklisted_app), blacklisted_app, app_name),
+    package_name = if_else(!is.na(blacklisted_app), "blacklsited_package", package_name)
+  ) %>% 
+  select(
+    panelist_id,
+    date,
+    datetime,
+    start_time,
+    end_time,
+    duration,
+    app_name,
+    package_name,
+    rows_merged
+    ) %>% 
+  ungroup() 
+```
+
+Now we have achieved a nice, tidy data set.
+
+### Calculating Visits
+
+Then we'll use this data set to determine the most frequently used apps.
+
+```{r}
+most_visited_apps = red_clean %>% 
+  filter(!app_name == "Android-System") %>% 
+  # group by application
+  group_by(app_name) %>% 
+  # summarise the total number of visits for each application
+  summarise(
+    visit = n()
+  ) %>% 
+  # sort in descending order
+  arrange(desc(visit)) %>% 
+  # select the top 10 rows
+  head(n = 10) 
+most_visited_apps
+```
+
+A table is nice but a plot is better. Let's visualize our findings using ggplot.
+
+```{r}
+plot6 = ggplot(most_visited_apps, aes(x = reorder(app_name, visit), y = visit)) +
+  geom_col(width = 0.6, fill = "#5E81AC") +
+  coord_flip() +
+  geom_text(aes(label = visit), hjust = -0.2, size = 3, family = "Times New Roman") +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.15))) +
+  theme_minimal(base_size = 13, base_family = "Times New Roman") +
+  theme(
+    legend.position = "none",
+    plot.title = element_text(face = "bold", size = 14, family = "Times New Roman"),
+    axis.text.y = element_text(family = "Times New Roman"),
+    axis.text.x = element_text(family = "Times New Roman")
+  ) +
+  labs(
+    title = "Top 10 most used apps",
+    subtitle = "Data based on a Sample of German Internet Users (N = XXX)",
+    x = "App Name",
+    y = "Visits"
+  )
+
+plot6
+```
+
+### Calculating the number of shares per app
+
+We have already created several plots. But now I would like to briefly draw your attention to the advantages of the unprocessed red data set. Here we have some more information than in the blue one, for example about shares and notifications. Let's take a quick look at that.
+
+```{r}
+shares = red_coded %>% 
+  filter(!app_name == "Android-System") %>% 
+  filter(event_type == 9) %>% 
+  group_by(app_name) %>% 
+  summarise(
+    n_shares = n()
+  ) %>% 
+  arrange(desc(n_shares)) %>% 
+  head(n = 5) %>% 
+  mutate(
+    app_name = str_replace(app_name, "Fotos�& Videos", "Fotos & Videos")
+  )
+
+plot7 = ggplot(shares, aes(x = reorder(app_name, n_shares), y = n_shares)) +
+  geom_col(width = 0.6, fill = "#5E81AC") +
+  coord_flip() +
+  geom_text(aes(label = n_shares), hjust = -0.2, size = 3, family = "Times New Roman") +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.15))) +
+  theme_minimal(base_size = 13, base_family = "Times New Roman") +
+  theme(
+    legend.position = "none",
+    plot.title = element_text(face = "bold", size = 14, family = "Times New Roman"),
+    axis.text.y = element_text(family = "Times New Roman"),
+    axis.text.x = element_text(family = "Times New Roman")
+  ) +
+  labs(
+    title = "Top 5 apps with most shares",
+    subtitle = "Data based on a Sample of German Internet Users (N = XXX)",
+    x = "App Name",
+    y = "Shares"
+  )
+
+plot7
+```
+
+### Calculating the number of notifications per app
+
+And then we'll do the same thing again for notifications.
+
+```{r}
+notifications = red_coded %>% 
+  filter(!app_name == "Android-System") %>% 
+  filter(event_type == 12) %>% 
+  group_by(app_name) %>% 
+  summarise(
+    n_notifications = n()
+  ) %>% 
+  arrange(desc(n_notifications)) %>% 
+  head(n = 5)
+
+
+plot8 = ggplot(notifications, aes(x = reorder(app_name, n_notifications), y = n_notifications)) +
+  geom_col(width = 0.6, fill = "#5E81AC") +
+  coord_flip() +
+  geom_text(aes(label = n_notifications), hjust = -0.2, size = 3, family = "Times New Roman") +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.15))) +
+  theme_minimal(base_size = 13, base_family = "Times New Roman") +
+  theme(
+    legend.position = "none",
+    plot.title = element_text(face = "bold", size = 14, family = "Times New Roman"),
+    axis.text.y = element_text(family = "Times New Roman"),
+    axis.text.x = element_text(family = "Times New Roman")
+  ) +
+  labs(
+    title = "Top 5 apps with most notifications",
+    subtitle = "Data based on a Sample of German Internet Users (N = XXX)",
+    x = "App Name",
+    y = "Notifications"
+  )
+
+plot8
+```
+
+That brings us to the end.
 
 <!-- End -->
 
 ## Conclusion
 
-Now you know how to do AAAA and BBBB.
+If you've made it this far, I hope we've been able to give you a good introduction to the processing and analysis of Android log data. Among other things, we have covered data processing, which includes removing duplicates and consecutive apps, removing background processes, and using blacklists and Android event types. You have also gained an overview of the most common analysis dimensions for app tracking data, which include app, person, and time levels.
 
 ## References
