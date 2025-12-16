@@ -913,9 +913,9 @@ red_coded = red_data %>%
       # Start / open / activate
       event_type %in% c(1, 4, 11, 14, 15, 18, 19, 22, 27) ~ "Start",
       # Stop / pause / close / deactivate
-      event_type %in% c(2, 3, 10, 13, 16, 17, 20, 21, 23, 24, 25, 26) ~ "Stop",
+      event_type %in% c(2, 3, 10, 13, 16, 17, 20, 23, 24, 25, 26) ~ "Stop",
       # System / configuration / meta data
-      event_type %in% c(5, 6, 7, 9, 8, 12, 28, 29, 30, 31) ~ "Meta/Config",
+      event_type %in% c(5, 6, 7, 9, 8, 12, 21, 28, 29, 30, 31) ~ "Meta/Config",
       .default = NA_character_
     ),
     datetime = as_datetime(seen_timestamp / 1000, tz = "Europe/Berlin")
@@ -940,6 +940,7 @@ Our initial goal is to achieve a data structure like the one in the blue data se
 
 ```{r}
 red_start_stop = red_coded %>% 
+  filter(app_name != "Android-System") %>% 
   # we are not interested in the meta/config event_types, therefore we filter for start and stop 
   filter(event %in% c("Start", "Stop")) %>% 
   # we are using the same logic as before 
@@ -950,7 +951,7 @@ red_start_stop = red_coded %>%
     next_panelist = lead(panelist_id, n = 1L)
   ) %>% 
   filter(
-    event == "Start" & next_event == "Stop" & app_name == next_app & panelist_id == next_panelist
+    event == "Start" & next_event == "Stop" & panelist_id == next_panelist
   ) %>% 
   # let's rename some variable for more convenience
   rename(
@@ -979,6 +980,85 @@ red_start_stop = red_coded %>%
 glimpse(red_start_stop)
 ```
 
+```{r}
+app_meta = app_coded %>% 
+  filter(
+    event_type %in% c(7, 9, 10, 12)
+  ) %>% 
+  mutate(
+    start_time = as.POSIXct(seen_timestamp / 1000, format = "%Y-%m-%d %H:%M:%S", tz = "Europe/Berlin"),
+    end_time = as.POSIXct(seen_timestamp / 1000, format = "%Y-%m-%d %H:%M:%S", tz = "Europe/Berlin"),
+    duration = 0,
+    rows_merged = NA_character_,
+    event = case_when(
+      event_type == 7 ~ "User interaction",
+      event_type == 9 ~ "Share",
+      event_type == 10 ~ "Notification seen",
+      event_type == 12 ~ "Interruptive notification",
+      .default = NA_character_)
+  ) %>% 
+  select(
+    participant_code,
+    date,
+    datetime,
+    start_time,
+    end_time,
+    duration,
+    app_name,
+    package_name,
+    rows_merged,
+    event
+    )
+```
+
+```{r}
+screen_start_stop = app_coded %>% 
+  ungroup() %>% 
+  filter(app_name == "Android-System") %>% 
+  # we are not interested in the meta/config event_types, therefore we filter for start and stop 
+  filter(event %in% c("Start", "Stop")) %>% 
+  # group by participant_code and app_name
+  group_by(participant_code, app_name) %>% 
+  # sort rows in temporal order by participant
+  arrange(seen_timestamp, .by_group = TRUE) %>% 
+  # we are using the same logic as before 
+  mutate(
+    next_event = lead(event, n = 1L),
+    next_timestamp = lead(seen_timestamp, n = 1L),
+    next_app = lead(app_name, n = 1L),
+    next_panelist = lead(participant_code, n = 1L)
+  ) %>% 
+  filter(
+    event == "Start" & next_event == "Stop" & participant_code == next_panelist
+  ) %>% 
+  # let's rename some variable for more convenience
+  rename(
+    start_timestamp = seen_timestamp,
+    stop_timestamp = next_timestamp
+  ) %>% 
+  # calculate duration in seconds
+  mutate(
+    duration = (as.numeric(stop_timestamp) - as.numeric(start_timestamp)) / 1000, # in seconds
+    start_time = as.POSIXct(start_timestamp / 1000, format = "%Y-%m-%d %H:%M:%S", tz = "Europe/Berlin"),
+    end_time = as.POSIXct(stop_timestamp / 1000, format = "%Y-%m-%d %H:%M:%S", tz = "Europe/Berlin"),
+    rows_merged = NA_character_,
+    event = "Screen"
+  ) %>% 
+  # select only relevant variables
+  select(
+    participant_code,
+    date,
+    datetime,
+    start_time,
+    end_time,
+    duration,
+    app_name,
+    package_name,
+    rows_merged,
+    event
+  ) 
+```
+
 We have now reached an interim stage by recoding information about the start and stop of the respective apps for our own use. Now we perform the same preprocessing steps as for the blue data set.
 
 ```{r}
@@ -992,33 +1072,34 @@ red_data_clean = red_start_stop %>%
   # make sure that you group by participant to avoid sorting across all participants
   group_by(panelist_id) %>% 
   # make sure that you take the grouping into account, when you sort your data
-  arrange(desc(start_time), .by_group = TRUE) %>% 
+  arrange(start_time, .by_group = TRUE) %>% 
   # it is important that you use lag() or lead() based on your sorting (descending or ascending)
   mutate(
     # we use the 'next_panelist_id' variable to ensure that participants are not mixed up by accident.
-    next_panelist_id = lag(panelist_id, n = 1L),
+    next_panelist_id = lead(panelist_id, n = 1L),
     # we use the 'next_app_name' to identify potential consecutive app visits
-    next_app_name = lag(app_name, n = 1L),
+    next_app_name = lead(app_name, n = 1L),
     # we need the 'next_start_time' to calculate the time_gap between events
-    next_start_time = lag(start_time, n = 1L),
+    next_start_time = lead(start_time, n = 1L),
     # we calculate the time_gap in seconds
     time_gap = as.numeric(next_start_time - end_time, units = "secs"),
     # we use 'previous_start_time' to replace 'start_time' with the new correct timestamp if we merge consecutive app visits
-    previous_start_time = lead(start_time, n = 1L)
+    previous_start_time = lag(start_time, n = 1L)
   ) %>% 
   mutate(
     # we use a filter variable to identify consecutive app visits, which we can remove later
     # conditions are:
     # - panelist_id and next_panelist_id are identical
     # - app_name and next_app_name are identical
-    # - time_gap equals 0
-    filter_var = if_else((panelist_id == next_panelist_id & app_name == next_app_name & time_gap == 0), "remove", "keep"),
+    # - time_gap smaller than 1 sec
+    filter_var = if_else((participant_code == next_participant_code & app_name == next_app_name & time_gap <= 1), "remove", "keep"),
     # I like to keep an column indicating that I changed something, therefore I create 'rows_merged'
-    rows_merged = if_else((lead(filter_var)) == "remove", "Yes", "No"),
+    rows_merged = if_else((lag(filter_var)) == "remove", "Yes", "No"),
     # replace 'start_time' with 'previous_start_time' for relevant rows 
     start_time = if_else(filter_var == "keep" & rows_merged == "Yes", as_datetime(previous_start_time), as_datetime(start_time)),
     # replace 'duration' with the updated duration for relevant rows
-    duration = if_else(filter_var == "keep" & rows_merged == "Yes", as.numeric(end_time - start_time, units = "secs"), duration)
+    duration = if_else(filter_var == "keep" & rows_merged == "Yes", as.numeric(end_time - start_time, units = "secs"), duration),
+    datetime = if_else(filter_var == "keep" & rows_merged == "Yes", as_datetime(previous_start_time), as_datetime(datetime)),
   ) %>% 
   # remove consecutive visits
   filter(filter_var == "keep") %>% 
@@ -1029,8 +1110,22 @@ red_data_clean = red_start_stop %>%
     app_name = if_else(!is.na(blacklisted_app), blacklisted_app, app_name),
     package_name = if_else(!is.na(blacklisted_app), "blacklsited_package", package_name)
   ) %>% 
+  # add meta rows
+  bind_rows(app_meta) %>% 
+  # add screen rows
+  bind_rows(screen_start_stop) %>% 
+  group_by(participant_code) %>% 
+  arrange(start_time, .by_group = TRUE) %>% 
+  ungroup() %>% 
+  mutate(
+    app_name = app_name %>%  
+      str_to_lower(locale = "C") %>% 
+      str_replace_all("[^\\x00-\\x7F]", " ") %>%  # Entfernt Nicht-ASCII
+      str_replace_all("[^a-z0-9\\s]", " ") %>%   # Entfernt spezielle Zeichen (außer a-z, 0-9, Leerzeichen)
+      str_squish()
+  ) %>% 
   select(
-    panelist_id,
+    participant_code,
     date,
     datetime,
     start_time,
@@ -1038,9 +1133,9 @@ red_data_clean = red_start_stop %>%
     duration,
     app_name,
     package_name,
+    event,
     rows_merged
-    ) %>% 
-  ungroup() 
+    ) 
 ```
 
 Now we have achieved a nice, tidy data set.
