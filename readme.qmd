@@ -72,9 +72,7 @@ Install the R packages.
 #| eval: false
 install.packages("dplyr")
 install.packages("lubridate")
-install.packages("purrr")
 install.packages("tidyr")
-install.packages("kableExtra")
 install.packages("ggplot2")
 install.packages("extrafont")
 install.packages("forcats")
@@ -85,12 +83,10 @@ And load the R packages.
 
 ```{r}
 #| message: false
-require(dplyr)
-require(lubridate)
-require(purrr)
-require(tidyr)
-require(kableExtra)
-require(ggplot2)
+library(dplyr)
+library(lubridate)
+library(tidyr)
+library(ggplot2)
 library(extrafont)
 library(forcats)
 library(stringr)
@@ -98,7 +94,7 @@ library(stringr)
 
 ```{r}
 #| message: false
-# Options
+# Effectively disable scientific notation
 options(scipen = 999)
 ```
 
@@ -195,17 +191,27 @@ glimpse(blue_data)
 
 ```{r}
 blue_data_clean = blue_data %>% 
-  # let's make sure that there are no background apps in our data set
+  
+  # remove background app logs from our data set
   filter(!app_package %in% background_apps$pcn) %>% 
+  
+  # replace sensitive apps in your data set to strengthen anonymisation
+  left_join(blacklisted_apps, by = "app_name") %>% 
+  mutate(
+    # if the package is on our blacklisted_app list replace the name with a generic label
+    app_name = if_else(!is.na(blacklisted_app), blacklisted_app, app_name),
+    app_package = if_else(!is.na(blacklisted_app), "blacklisted_package", app_package)
+  ) %>% 
+  select(-blacklisted_app) %>% 
+  
   # convert start_time and end_time to proper datetime format, make sure to choose the correct timezone (tz)
   mutate(
     start_time = as.POSIXct(start_time, format = "%Y-%m-%d %H:%M:%S", tz = "Europe/Berlin"),
     end_time   = as.POSIXct(end_time,   format = "%Y-%m-%d %H:%M:%S", tz = "Europe/Berlin")
   ) %>% 
-  # we need to sort our rows in the correct temporal order
-  # make sure that you group by participant to avoid sorting across all participants
+  
+  # sort our rows in the correct temporal order per participant
   group_by(panelist_id) %>% 
-  # make sure that you take the grouping into account, when you sort your data
   arrange(desc(start_time), .by_group = TRUE) %>% 
   # it is important that you use lag() or lead() based on your sorting (descending or ascending)
   mutate(
@@ -220,8 +226,9 @@ blue_data_clean = blue_data %>%
     # we use 'previous_start_time' to replace 'start_time' with the new correct timestamp if we merge consecutive app visits
     previous_start_time = lead(start_time, n = 1L)
   ) %>% 
+  
+  # we use a filter variable to identify consecutive app visits, which we can remove later
   mutate(
-    # we use a filter variable to identify consecutive app visits, which we can remove later
     # conditions are:
     # - panelist_id and next_panelist_id are identical
     # - app_name and next_app_name are identical
@@ -236,15 +243,8 @@ blue_data_clean = blue_data %>%
   ) %>% 
   # remove consecutive visits
   filter(filter_var == "keep") %>% 
-  # I suggest replacing sensitive apps in your data set to strengthen anonymisation
-  # replace 'app_names' based on our blacklisted apps
-  left_join(blacklisted_apps, by = "app_name") %>% 
-  mutate(
-    app_name = if_else(!is.na(blacklisted_app), blacklisted_app, app_name),
-    app_package = if_else(!is.na(blacklisted_app), "blacklsited_package", app_package)
-  ) %>% 
-  select(-blacklisted_app) %>% 
   ungroup() 
+
 ```
 
 Okay, we are done with our preprocessing of the blue data set. Let's have a quick look.
@@ -281,7 +281,7 @@ most_visited_apps
 A table is nice but a plot is better. Let's visualize our findings using ggplot.
 
 ```{r}
-# We need the number of participants later
+# We need the number of participants for our plot
 blue_n_participants = blue_data_clean %>% 
   summarise(
     n_panelist = n_distinct(panelist_id)
@@ -301,7 +301,7 @@ plot1 = ggplot(most_visited_apps, aes(x = reorder(app_name, visit), y = visit)) 
     axis.text.x = element_text(family = "Times New Roman")
   ) +
   labs(
-    title = "Top 10 most used apps",
+    title = "Top 10 most used apps by number of visits",
     subtitle = paste0("Data based on a Sample of German Internet Users (N = ", blue_n_participants, ")"),
     x = "App Name",
     y = "Visits"
@@ -322,7 +322,7 @@ This enables us calculate the duration per app and aggregate it over time. This 
 most_used_apps = blue_data_clean %>% 
   # group by application
   group_by(app_name) %>% 
-  # summarise the total number of visits for each application
+  # summarise the total duration of each application
   summarise(
     duration = round(sum(duration, na.rm = TRUE) / 60, digits = 2) # we divide by 60 to get minutes and round the result
   ) %>% 
@@ -349,7 +349,7 @@ plot2 = ggplot(most_used_apps, aes(x = reorder(app_name, duration), y = duration
     axis.text.x = element_text(family = "Times New Roman")
   ) +
   labs(
-    title = "Top 10 most used apps",
+    title = "Top 10 most used apps by total duration",
     subtitle = paste0("Data based on a Sample of German Internet Users (N = ", blue_n_participants, ")"),
     x = "App Name",
     y = "Duration in minutes"
@@ -1129,7 +1129,7 @@ red_data_clean = red_start_stop %>%
   left_join(blacklisted_apps, by = "app_name") %>%
   mutate(
     app_name = if_else(!is.na(blacklisted_app), blacklisted_app, app_name),
-    package_name = if_else(!is.na(blacklisted_app), "blacklsited_package", package_name)
+    package_name = if_else(!is.na(blacklisted_app), "blacklisted_package", package_name)
   ) %>%
   # add meta rows
   bind_rows(app_meta) %>%
