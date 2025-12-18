@@ -959,7 +959,7 @@ glimpse(red_coded)
 Our initial goal is to achieve a data structure like the one in the blue data set. To do this, we will initially focus only on the start and stop of apps.
 
 ```{r}
-red_start_stop = app_coded %>%
+red_start_stop = red_coded %>%
   filter(app_name != "Android-System") %>%
   # we are not interested in the meta/config event_types, therefore we filter for start and stop
   filter(event %in% c("Start", "Stop")) %>%
