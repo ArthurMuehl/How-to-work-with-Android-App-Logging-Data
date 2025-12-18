@@ -32,7 +32,9 @@ format:
   html:
     toc: true
     toc-depth: 3
+    toc-expand: 3
     number-sections: true
+    number-depth: 3
     smooth-scroll: true
     
 execute:
@@ -45,21 +47,23 @@ execute:
 set.seed(721831)
 ```
 
-# Learning Objectives
+# Course Overview
 
-This guide aims to provide learners with the conceptual understanding and practical skills needed to import, clean, transform, and analyse Android log data using R and the tidyverse ecosystem. By the end of the module, learners should be able to transform raw device logs into meaningful analytical datasets suitable for behavioural, usability, or digital phenotyping studies.
+## Learning Objectives
+
+This guide aims to provide learners with the conceptual understanding and practical skills needed to import, clean, transform, and analyse Android log data using R and the tidyverse ecosystem. By the end of the module, learners should be able to transform raw device logs into meaningful analytical data sets suitable for behavioural, usability, or digital phenotyping studies.
 
 This includes:
 
-1.  Understanding the Structure of Android Log Data (e.g. Identify key variables typically found in Android logs)
-2.  Data Import and preprocessing with tidyverse
-3.  Operationalising exposure and media usage (e.g. session duration, app usage, ...)
+1.  Understanding the structure of Android log data, including key variables commonly found in app logs.
+2.  Importing and preprocessing both already processed and raw Android log data using the tidyverse.
+3.  Computing and visualizing key usage measures such as visits, session durations and sequences.
 
-# Target audience
+## Target audience
 
 This guide is designed for researchers, data analysts, and students who are interested in working with mobile sensing or digital trace data, particularly Android log files. It assumes a basic familiarity with R and the tidyverse ecosystem, including data manipulation with dplyr and data visualization with ggplot2. Participants should already understand fundamental data analysis concepts and be ready to apply them to the challenges of preprocessing and analysing complex, time-based log data.
 
-# Setting up the computational environment
+## Setting up the computational environment
 
 Install the R packages.
 
@@ -68,9 +72,7 @@ Install the R packages.
 #| eval: false
 install.packages("dplyr")
 install.packages("lubridate")
-install.packages("purrr")
 install.packages("tidyr")
-install.packages("kableExtra")
 install.packages("ggplot2")
 install.packages("extrafont")
 install.packages("forcats")
@@ -81,12 +83,10 @@ And load the R packages.
 
 ```{r}
 #| message: false
-require(dplyr)
-require(lubridate)
-require(purrr)
-require(tidyr)
-require(kableExtra)
-require(ggplot2)
+library(dplyr)
+library(lubridate)
+library(tidyr)
+library(ggplot2)
 library(extrafont)
 library(forcats)
 library(stringr)
@@ -94,15 +94,15 @@ library(stringr)
 
 ```{r}
 #| message: false
-# Options
+# Effectively disable scientific notation
 options(scipen = 999)
 ```
 
-# Duration
+## Duration
 
-Around half a day.
+You'll be able to complete the module in about half a day.
 
-# Social Science Usecase(s)
+# Social Science Usecases
 
 This method has been used in previous studies to evaluate information usage of Fridays for Future supporters [e.g. @Zerrer2024], research on well-being [e.g. @Klingelhoefer2025] and smartphone usage patterns [e.g. @Toth2025].
 
@@ -112,19 +112,21 @@ This method has been used in previous studies to evaluate information usage of F
 
 # Some Context about Android App Log Data
 
-Android app log data are automatically generated records that capture interactions between users, apps, and the operating system on Android devices. These logs originate from system services and applications that record events such as app launches, screen on/off states, foreground and background transitions, notifications, and sensor activities. They often include time-stamped information identifying the event type, the app or process involved (via package names), and contextual metadata such as battery status, network connectivity, or user interactions.
+Android app log data are automatically generated records that capture interactions between users, apps, and the operating system on Android devices. System services and applications record events such as app launches, screen on/off states, foreground and background transitions, notifications, and sensor activities. Each event is typically time-stamped and includes the event type, the app or process involved, and contextual metadata such as battery status, network connectivity, or user interactions. These digital traces allow researchers to reconstruct usage episodes in detail and study digital mobile behavior.
 
 # The red or blue pill?
 
 Since the degree of preprocessing and thus the structure of app logging data can vary, we will look at two example cases. The first case is based on a data set that has already been preprocessed to a relatively high degree by a panel provider, thus providing a good introduction to some basic concepts in data analysis.
 
-We call this data set “blue” in a somewhat fitting reference to the blue pill in The Matrix.
+In reference to The Matrix, we call this the "blue" data set. For now, we will remain in the more comfortable world of convenient and rather well-preprocessed data structures. Later in the tutorial, however, we will turn to the "red" data set and confront the messy reality of raw event logs.
 
 # The blue data set
 
+<!-- BOOKMARK - I THINK WE SHOULD ADD A SHORT SENTECE TO DESCRIBE THE DATA SET (CONTEXT, SAMPLE SIZE ETC.) -->
+
 ![Image generated by Midjourney](images/image_2_blue_pill_v2.png)
 
-Before any analysis can begin, it’s crucial to understand how the data is organized. A typical more processed Android logging dataset includes the following variables:
+Before any analysis can begin, it’s crucial to understand how the data is organized. A typical more processed Android logging data set includes the following variables:
 
 *panelist_id* – unique identifier for each user or device
 
@@ -144,7 +146,7 @@ Before any analysis can begin, it’s crucial to understand how the data is orga
 
 ## Common Dimensions of Analysis
 
-We will use the blue dataset to familiarize you with some conceptual decisions. However, in the course of the tutorial, we will use the red dataset more to demonstrate the computational steps of data preparation. Nevertheless, these forthcoming conceptual decisions are also relevant for the red dataset.
+We will use the blue data set to familiarize you with some conceptual decisions. However, in the course of the tutorial, we will use the red data set more to demonstrate the computational steps of data preparation. Nevertheless, these forthcoming conceptual decisions are also relevant for the red data set.
 
 To make sense of app log data, analysts typically view it through several dimensions of analysis:
 
@@ -168,14 +170,14 @@ Raw log data often contains a large amount of noise from background processes an
 
 *Merge consecutive visits to the same app* - sometimes apps are interrupted by system apps, which leads to a technical artifact that appears as a new app visit. To prevent these from being misinterpreted as human behavior (e.g., as intentional app access), these cases are removed.
 
-*Blacklisting apps* – recode apps that are irrelevant to the research question and are potential sensitive (e.g., health apps, banking, etc.). I have prepared a preliminary list of blacklisted apps for this tutorial. You can find the script for this on GitHub (blacklisted_apps.qmd).
+*Blacklisting apps* – recode or generalize apps that are irrelevant to the research question and are potential sensitive (e.g., health apps, banking, etc.). I have prepared a preliminary list of blacklisted apps for this tutorial. You can find the script for this on GitHub (blacklisted_apps.qmd).
 
 ```{r}
 background_apps = read.csv("data/background_system_packages.csv") # based on Parry & Toth (2025) with some smaller extensions
 blacklisted_apps = readRDS("data/blacklisted_apps.rds") %>% select(-app_package) %>% distinct(app_name, .keep_all = TRUE)
 ```
 
-Let's import our dataset.
+Let's import our data set.
 
 ```{r import data}
 blue_data = readRDS("data/blue_data.rds") 
@@ -189,17 +191,27 @@ glimpse(blue_data)
 
 ```{r}
 blue_data_clean = blue_data %>% 
-  # let's make sure that there are no background apps in our data set
+  
+  # remove background app logs from our data set
   filter(!app_package %in% background_apps$pcn) %>% 
+  
+  # replace sensitive apps in your data set to strengthen anonymisation
+  left_join(blacklisted_apps, by = "app_name") %>% 
+  mutate(
+    # if the package is on our blacklisted_app list replace the name with a generic label
+    app_name = if_else(!is.na(blacklisted_app), blacklisted_app, app_name),
+    app_package = if_else(!is.na(blacklisted_app), "blacklisted_package", app_package)
+  ) %>% 
+  select(-blacklisted_app) %>% 
+  
   # convert start_time and end_time to proper datetime format, make sure to choose the correct timezone (tz)
   mutate(
     start_time = as.POSIXct(start_time, format = "%Y-%m-%d %H:%M:%S", tz = "Europe/Berlin"),
     end_time   = as.POSIXct(end_time,   format = "%Y-%m-%d %H:%M:%S", tz = "Europe/Berlin")
   ) %>% 
-  # we need to sort our rows in the correct temporal order
-  # make sure that you group by participant to avoid sorting across all participants
+  
+  # sort our rows in the correct temporal order per participant
   group_by(panelist_id) %>% 
-  # make sure that you take the grouping into account, when you sort your data
   arrange(desc(start_time), .by_group = TRUE) %>% 
   # it is important that you use lag() or lead() based on your sorting (descending or ascending)
   mutate(
@@ -214,8 +226,9 @@ blue_data_clean = blue_data %>%
     # we use 'previous_start_time' to replace 'start_time' with the new correct timestamp if we merge consecutive app visits
     previous_start_time = lead(start_time, n = 1L)
   ) %>% 
+  
+  # we use a filter variable to identify consecutive app visits, which we can remove later
   mutate(
-    # we use a filter variable to identify consecutive app visits, which we can remove later
     # conditions are:
     # - panelist_id and next_panelist_id are identical
     # - app_name and next_app_name are identical
@@ -230,15 +243,8 @@ blue_data_clean = blue_data %>%
   ) %>% 
   # remove consecutive visits
   filter(filter_var == "keep") %>% 
-  # I suggest replacing sensitive apps in your dataset to strengthen anonymisation
-  # replace 'app_names' based on our blacklisted apps
-  left_join(blacklisted_apps, by = "app_name") %>% 
-  mutate(
-    app_name = if_else(!is.na(blacklisted_app), blacklisted_app, app_name),
-    app_package = if_else(!is.na(blacklisted_app), "blacklsited_package", app_package)
-  ) %>% 
-  select(-blacklisted_app) %>% 
   ungroup() 
+
 ```
 
 Okay, we are done with our preprocessing of the blue data set. Let's have a quick look.
@@ -252,6 +258,8 @@ Alright, we are ready for some analysis.
 ## Calculating Visits
 
 A visit represents a unit of exposure, such as a discrete instance of app use. Establishing a robust visit definition ensures consistent measurement of usage frequency across data sets and users.
+
+<!-- BOOKMARK - WHAT IS OUR DEFINITION? -->
 
 Let's stick to the dimensions we're using for comparison. We are interested in the top 10 most-visited apps in our sample (dimension = app level).
 
@@ -273,7 +281,7 @@ most_visited_apps
 A table is nice but a plot is better. Let's visualize our findings using ggplot.
 
 ```{r}
-# We need the number of participants later
+# We need the number of participants for our plot
 blue_n_participants = blue_data_clean %>% 
   summarise(
     n_panelist = n_distinct(panelist_id)
@@ -283,17 +291,17 @@ blue_n_participants = blue_data_clean %>%
 plot1 = ggplot(most_visited_apps, aes(x = reorder(app_name, visit), y = visit)) +
   geom_col(width = 0.6, fill = "#5E81AC") +
   coord_flip() +
-  geom_text(aes(label = visit), hjust = -0.2, size = 3, family = "Times New Roman") +
+  geom_text(aes(label = visit), hjust = -0.2, size = 3, family = "serif") +
   scale_y_continuous(expand = expansion(mult = c(0, 0.15))) +
-  theme_minimal(base_size = 13, base_family = "Times New Roman") +
+  theme_minimal(base_size = 13, base_family = "serif") +
   theme(
     legend.position = "none",
-    plot.title = element_text(face = "bold", size = 14, family = "Times New Roman"),
-    axis.text.y = element_text(family = "Times New Roman"),
-    axis.text.x = element_text(family = "Times New Roman")
+    plot.title = element_text(face = "bold", size = 14, family = "serif"),
+    axis.text.y = element_text(family = "serif"),
+    axis.text.x = element_text(family = "serif")
   ) +
   labs(
-    title = "Top 10 most used apps",
+    title = "Top 10 most used apps by number of visits",
     subtitle = paste0("Data based on a Sample of German Internet Users (N = ", blue_n_participants, ")"),
     x = "App Name",
     y = "Visits"
@@ -304,9 +312,9 @@ plot1
 
 ## Calculating Duration
 
-Duration reflects how long a user is exposed to an app or activity. It is another vital form of exposure that complements visit counts.
+Duration reflects how long a user is exposed to an app or activity. It is another key measure of exposure that complements visit counts.
 
-Therefore we need to derive start_time, stop_time and the duration for each event, which is already done in our nice blue data set.
+If a data set doesn't contain the duration of each event, start_time and end_time can be used to calculate it. Our tidy blue data set, however, already contains all three variables.
 
 This enables us calculate the duration per app and aggregate it over time. This can include overall smartphone duration, app-specific duration (e.g., Instagram), and temporal patterns of duration. Duration metrics reveal not only how often apps are used, but how much attention they receive.
 
@@ -314,7 +322,7 @@ This enables us calculate the duration per app and aggregate it over time. This 
 most_used_apps = blue_data_clean %>% 
   # group by application
   group_by(app_name) %>% 
-  # summarise the total number of visits for each application
+  # summarise the total duration of each application
   summarise(
     duration = round(sum(duration, na.rm = TRUE) / 60, digits = 2) # we divide by 60 to get minutes and round the result
   ) %>% 
@@ -331,17 +339,17 @@ Let's plot this again.
 plot2 = ggplot(most_used_apps, aes(x = reorder(app_name, duration), y = duration)) +
   geom_col(width = 0.6, fill = "#5E81AC") +
   coord_flip() +
-  geom_text(aes(label = duration), hjust = -0.2, size = 3, family = "Times New Roman") +
+  geom_text(aes(label = duration), hjust = -0.2, size = 3, family = "serif") +
   scale_y_continuous(expand = expansion(mult = c(0, 0.15))) +
-  theme_minimal(base_size = 13, base_family = "Times New Roman") +
+  theme_minimal(base_size = 13, base_family = "serif") +
   theme(
     legend.position = "none",
-    plot.title = element_text(face = "bold", size = 14, family = "Times New Roman"),
-    axis.text.y = element_text(family = "Times New Roman"),
-    axis.text.x = element_text(family = "Times New Roman")
+    plot.title = element_text(face = "bold", size = 14, family = "serif"),
+    axis.text.y = element_text(family = "serif"),
+    axis.text.x = element_text(family = "serif")
   ) +
   labs(
-    title = "Top 10 most used apps",
+    title = "Top 10 most used apps by total duration",
     subtitle = paste0("Data based on a Sample of German Internet Users (N = ", blue_n_participants, ")"),
     x = "App Name",
     y = "Duration in minutes"
@@ -352,7 +360,7 @@ plot2
 
 ## Mobile Behavior between participants
 
-In my opinion, the phenomenon of extremely skewed distribution is important for understanding the structure of digital behavioral data in general and app usage data in particular. The use of apps or smartphones varies greatly between the individuals observed and between time units. This becomes particularly important when location parameters or other statistical measures or calculations are performed.
+The distributions in app usage data are often extremely skewed. The use of apps or smartphones varies greatly between the individuals observed and between time units and a small number of heavy users often account for a large share of total usage. This becomes particularly important when choosing summary statistics: measures of central tendency such as the mean and median can differ substantially, and robust statistics (medians, quantiles) are often more informative than means alone.
 
 Let's take a quick look at this using Instagram usage as an example.
 
@@ -379,13 +387,14 @@ instagram_participants = blue_data_clean %>%
 plot3 = ggplot(instagram_participants, aes(x = metric, y = value, fill = metric)) +
   geom_violin(trim = FALSE, alpha = 0.6) +
   geom_boxplot(width = 0.2, outlier.size = 0.8, alpha = 0.9) +
+  stat_summary(fun = mean, geom = "point", shape = 4, size = 3) +
   scale_y_continuous(expand = expansion(mult = c(0, 0.15))) +
   scale_fill_manual(
     values = c("visits" = "#5E81AC", "duration" = "#5EA8AC"),
     labels = c("Visits", "Duration (minutes)")
   ) +
   facet_wrap(~ metric, scales = "free") +
-  theme_minimal(base_size = 13, base_family = "Times New Roman") +
+  theme_minimal(base_size = 13, base_family = "serif") +
   theme(
     legend.position = "none",
     strip.text = element_text(face = "bold", size = 12),
@@ -401,7 +410,9 @@ plot3 = ggplot(instagram_participants, aes(x = metric, y = value, fill = metric)
 plot3
 ```
 
-Okay, let's try to get a better idea of what's going on in our dataset. We will examine the data at an individual level and see how Instagram usage behaviour varies between our participants across days. As I am a very visual person, I prefer plots to tables.
+The violin plot shows how duration differs across participants. The boxplot indicates the median duration and the interquartile range, while the X marks the mean.
+
+Next, let's try to get a better idea of what's going on in our data set. To better understand the variation in our data, we examine Instagram usage at the individual level and analyse how usage differs across participants and across days. Plotting these distributions illustrates the differences in frequency and duration of app usage between participants and shows the skewed distribution.
 
 ```{r}
 random_sample_25 = blue_data_clean %>% 
@@ -432,10 +443,11 @@ plot3 = ggplot(instagram_participants_days,
       y = value,
       fill = metric)) +
   geom_boxplot(width = 0.5, outlier.size = 1, alpha = 0.8) +
+  stat_summary(fun = mean, geom = "point", shape = 4, size = 2) +
   facet_wrap(~ metric, scales = "free_y") +
   scale_fill_manual(values = c("duration" = "#5EA8AC")) +
   coord_flip() +
-  theme_minimal(base_size = 13, base_family = "Times New Roman") +
+  theme_minimal(base_size = 13, base_family = "serif") +
   theme(
     legend.position = "none",
     legend.title = element_blank()
@@ -448,9 +460,10 @@ plot3 = ggplot(instagram_participants_days,
   )
 
 plot3
+
 ```
 
-The large variance in the data is clearly evident here. The same applies to the occurrence of extreme values. This skewed distribution is also reflected in the widely differing values for the median and the mean. Against this background, the distribution of the app tracking data should be taken into account when selecting the parameters to be calculated (mean, median, etc.).
+The large variance in media usage duration, both across and within participants, is clearly evident here. The same applies to the occurrence of extreme values. This skewed distribution is also reflected in the widely differing values for the median and the mean. Against this background, the distribution of the app tracking data should be taken into account when selecting the parameters to be calculated.
 
 ## Mobile Behavior over time
 
@@ -494,7 +507,7 @@ plot4 = ggplot(week, aes(x = date, y = value, color = metric)) +
   scale_x_date(date_breaks = "1 day",
                date_labels = "%d.%m") +
   facet_wrap(~ app_name, ncol = 2, scales = "free_y") +
-  theme_minimal(base_size = 13, base_family = "Times New Roman") +
+  theme_minimal(base_size = 13, base_family = "serif") +
   theme(
     legend.title = element_blank(),
     legend.position = "top",
@@ -589,7 +602,7 @@ plot5 = ggplot(hourly_data, aes(x = hour, y = mean_hour_share)) +
   scale_x_datetime(date_breaks = "2 hour",
                    date_labels = "%H:%M") +
   facet_wrap(~ app_name, ncol = 2, scales = "free_y") +
-  theme_minimal(base_size = 13, base_family = "Times New Roman") +
+  theme_minimal(base_size = 13, base_family = "serif") +
   theme(
     legend.position = "none",
     plot.title = element_text(face = "bold"),
@@ -617,7 +630,8 @@ In this section, we introduce three key concepts:
 
 *Session* – as defined by Peng & Zhu, a sequence of events with a defined duration that represents a coherent unit of mobile behavior [@Peng2020].
 
-By identifying and analyzing sessions, we can capture the flow and structure of smartphone interaction, moving beyond isolated events to behavioral patterns.
+
+By identifying and analyzing sessions, we can capture the flow and structure of smartphone interaction, moving beyond isolated events to behavioral patterns. In this tutorial, we define a session as a sequence of app events for a given participant that is separated from the next sequence by at least 60 seconds of inactivity.
 
 ```{r}
 sessions = blue_data_clean %>% 
@@ -696,13 +710,12 @@ app_levels = unique(instagram_visual$app_name)
 apps_without_gap = setdiff(app_levels, "GAP")
 gap_color = c("GAP" = "#D8DEE9")
 
-colors =  c("#5E81AC", "#5EA8AC", "#625EAC", "#AC625E","#A8AC5E") 
-
-app_colors = setNames(
-  rep(colors, length.out = length(apps_without_gap)), apps_without_gap
+app_colors <- setNames(
+  grDevices::hcl.colors(length(apps_without_gap), palette = "Dynamic"),
+  apps_without_gap
 )
 
-color_map = c(gap_color, app_colors)
+color_map <- c(gap_color, app_colors)
 
 plot6 = ggplot(instagram_visual) +
   geom_segment(
@@ -723,7 +736,7 @@ plot6 = ggplot(instagram_visual) +
     y = NULL,
     title = "Instagram Usage Sequence of a Random User",
   ) +
-  theme_minimal(base_size = 13, base_family = "Times New Roman") +
+  theme_minimal(base_size = 13, base_family = "serif") +
   theme(
     legend.title = element_blank(),
     legend.position = "top",
@@ -732,7 +745,12 @@ plot6 = ggplot(instagram_visual) +
     axis.text.y  = element_blank(),
     axis.title.y = element_blank(),
     axis.ticks.y = element_blank()
-  )
+  )+ 
+   theme(
+    legend.position = "right",
+    legend.title = element_blank()
+  ) +
+  guides(color = guide_legend(override.aes = list(linewidth = 3)))
 
 plot6
 ```
@@ -744,6 +762,8 @@ We have now learned about some basic concepts and analyses of app tracking data 
 If you have such a data set, you can close your laptop at this point and be happy. If you want to continue, I would suggest taking a break now and then we'll look at the red data set.
 
 # The red data set
+
+<!-- BOOKMARK - I THINK WE SHOULD ADD A SHORT SENTECE TO DESCRIBE THE DATA SET (CONTEXT, SAMPLE SIZE ETC.) -->
 
 ![Image generated by Midjourney](images/image_3_red_pill_v2.png)
 
@@ -847,7 +867,7 @@ In order to get started, we first need our data.
 red_data = readRDS("data/red_data.rds")
 ```
 
-Let's check how our dataset looks like.
+Let's check how our data set looks like.
 
 ```{r}
 glimpse(red_data)
@@ -862,10 +882,10 @@ event_types = red_data %>%
     n = n()
   ) %>% 
   arrange(desc(n)) 
-event_types
+print(event_types, n = Inf)
 ```
 
-If we take a closer look, we see that there are some event types here that are not listed in the official Android documentation, e.g., event_type = 100. This can happen when manufacturers use a customized version of Android. For us, this means specifically that we do not know what event_type 100 stands for. I was also unable to find any reliable information on this. Welcome to the messy reality! Luckily these event types are not very frequent, therefore we ignore them for now.
+If we take a closer look, we see that there are some event types here that are not listed in the official Android documentation, e.g., event_type = 100. This can happen when manufacturers use a customized version of Android. For us, this means specifically that we do not know what event_type 100 stands for. I was also unable to find any reliable information on this. Welcome to the messy reality! For the purposes of this tutorial, we will ignore these unknown event types since they are rare in our data set. In applied research, however, such decisions should always be documented, and sensitivity analyses are recommended if these types of events are more frequent.
 
 Nevertheless, we will first convert the event_types into a more readable form, at least those for which we have information available.
 
@@ -939,25 +959,25 @@ glimpse(red_coded)
 Our initial goal is to achieve a data structure like the one in the blue data set. To do this, we will initially focus only on the start and stop of apps.
 
 ```{r}
-red_start_stop = red_coded %>% 
-  filter(app_name != "Android-System") %>% 
-  # we are not interested in the meta/config event_types, therefore we filter for start and stop 
-  filter(event %in% c("Start", "Stop")) %>% 
-  # we are using the same logic as before 
+red_start_stop = app_coded %>%
+  filter(app_name != "Android-System") %>%
+  # we are not interested in the meta/config event_types, therefore we filter for start and stop
+  filter(event %in% c("Start", "Stop")) %>%
+  # we are using the same logic as before
   mutate(
     next_event = lead(event, n = 1L),
     next_timestamp = lead(seen_timestamp, n = 1L),
     next_app = lead(app_name, n = 1L),
     next_panelist = lead(panelist_id, n = 1L)
-  ) %>% 
+  ) %>%
   filter(
     event == "Start" & next_event == "Stop" & panelist_id == next_panelist
-  ) %>% 
+  ) %>%
   # let's rename some variable for more convenience
   rename(
     start_timestamp = seen_timestamp,
     stop_timestamp = next_timestamp
-  ) %>% 
+  ) %>%
   # calculate duration in seconds
   mutate(
     duration = (stop_timestamp - start_timestamp) / 1000, # in seconds
@@ -974,7 +994,7 @@ red_start_stop = red_coded %>%
     app_name,
     event,
     package_name
-  ) %>% 
+  ) %>%
   ungroup()
 ```
 
@@ -985,10 +1005,11 @@ glimpse(red_start_stop)
 The usage duration of apps are not the only thing, we could analysis with Android app logging data. Let's say we are interested in push notifications. Therefore we want to include the information on notifications, shares and user interactions in our data set. We will use it later for some analysis.
 
 ```{r}
+
 app_meta = red_coded %>% 
   filter(
     event_type %in% c(7, 9, 10, 12)
-  ) %>% 
+  ) %>%
   mutate(
     start_time = as.POSIXct(seen_timestamp / 1000, format = "%Y-%m-%d %H:%M:%S", tz = "Europe/Berlin"),
     end_time = as.POSIXct(seen_timestamp / 1000, format = "%Y-%m-%d %H:%M:%S", tz = "Europe/Berlin"),
@@ -1000,7 +1021,7 @@ app_meta = red_coded %>%
       event_type == 10 ~ "Notification seen",
       event_type == 12 ~ "Interruptive notification",
       .default = NA_character_)
-  ) %>% 
+  ) %>%
   select(
     panelist_id,
     date,
@@ -1019,6 +1040,7 @@ Additionally, we are interested in the overall mobile screen time of our partici
 
 **Note:** Depending on your preferences for data management, you can either keep separate data frames or include all data in one data frame with a filter variable to easily select the necessary rows. In this tutorial, we will use a single data frame with the filter variable "event."
 ```{r}
+
 screen_start_stop = red_coded %>% 
   ungroup() %>% 
   filter(app_name == "Android-System") %>% 
@@ -1027,8 +1049,8 @@ screen_start_stop = red_coded %>%
   # group by participant_code and app_name
   group_by(panelist_id, app_name) %>% 
   # sort rows in temporal order by participant
-  arrange(seen_timestamp, .by_group = TRUE) %>% 
-  # we are using the same logic as before 
+  arrange(seen_timestamp, .by_group = TRUE) %>%
+  # we are using the same logic as before
   mutate(
     next_event = lead(event, n = 1L),
     next_timestamp = lead(seen_timestamp, n = 1L),
@@ -1042,7 +1064,7 @@ screen_start_stop = red_coded %>%
   rename(
     start_timestamp = seen_timestamp,
     stop_timestamp = next_timestamp
-  ) %>% 
+  ) %>%
   # calculate duration in seconds
   mutate(
     duration = (as.numeric(stop_timestamp) - as.numeric(start_timestamp)) / 1000, # in seconds
@@ -1051,7 +1073,7 @@ screen_start_stop = red_coded %>%
     rows_merged = NA_character_,
     # our filter variable
     event = "Screen"
-  ) %>% 
+  ) %>%
   # select only relevant variables
   select(
     panelist_id,
@@ -1064,23 +1086,23 @@ screen_start_stop = red_coded %>%
     package_name,
     rows_merged,
     event
-  ) 
+  )
 ```
 
 We have now reached an interim stage by recoding information about the start and stop of the respective apps for our own use. Now we perform the same preprocessing steps as for the blue data set.
 
 ```{r}
-red_data_clean = red_start_stop %>% 
+red_data_clean = red_start_stop %>%
   # convert start_time and end_time to proper datetime format, make sure to choose the correct timezone (tz)
   mutate(
     start_time = as.POSIXct(start_timestamp / 1000, format = "%Y-%m-%d %H:%M:%S", tz = "Europe/Berlin"),
     end_time   = as.POSIXct(stop_timestamp / 1000,   format = "%Y-%m-%d %H:%M:%S", tz = "Europe/Berlin")
-  ) %>% 
+  ) %>%
   # we need to sort our rows in the correct temporal order
   # make sure that you group by participant to avoid sorting across all participants
-  group_by(panelist_id) %>% 
+  group_by(panelist_id) %>%
   # make sure that you take the grouping into account, when you sort your data
-  arrange(start_time, .by_group = TRUE) %>% 
+  arrange(start_time, .by_group = TRUE) %>%
   # it is important that you use lag() or lead() based on your sorting (descending or ascending)
   mutate(
     # we use the 'next_panelist_id' variable to ensure that participants are not mixed up by accident.
@@ -1093,7 +1115,7 @@ red_data_clean = red_start_stop %>%
     time_gap = as.numeric(next_start_time - end_time, units = "secs"),
     # we use 'previous_start_time' to replace 'start_time' with the new correct timestamp if we merge consecutive app visits
     previous_start_time = lag(start_time, n = 1L)
-  ) %>% 
+  ) %>%
   mutate(
     # we use a filter variable to identify consecutive app visits, which we can remove later
     # conditions are:
@@ -1103,35 +1125,35 @@ red_data_clean = red_start_stop %>%
     filter_var = if_else((panelist_id == next_panelist_id & app_name == next_app_name & time_gap <= 1), "remove", "keep"),
     # I like to keep an column indicating that I changed something, therefore I create 'rows_merged'
     rows_merged = if_else((lag(filter_var)) == "remove", "Yes", "No"),
-    # replace 'start_time' with 'previous_start_time' for relevant rows 
+    # replace 'start_time' with 'previous_start_time' for relevant rows
     start_time = if_else(filter_var == "keep" & rows_merged == "Yes", as_datetime(previous_start_time), as_datetime(start_time)),
     # replace 'duration' with the updated duration for relevant rows
     duration = if_else(filter_var == "keep" & rows_merged == "Yes", as.numeric(end_time - start_time, units = "secs"), duration),
     datetime = if_else(filter_var == "keep" & rows_merged == "Yes", as_datetime(previous_start_time), as_datetime(datetime)),
-  ) %>% 
+  ) %>%
   # remove consecutive visits
-  filter(filter_var == "keep") %>% 
-  # I suggest replacing sensitive apps in your dataset to strengthen anonymisation
+  filter(filter_var == "keep") %>%
+  # I suggest replacing sensitive apps in your data set to strengthen anonymisation
   # replace 'app_names' based on our blacklisted apps
-  left_join(blacklisted_apps, by = "app_name") %>% 
+  left_join(blacklisted_apps, by = "app_name") %>%
   mutate(
     app_name = if_else(!is.na(blacklisted_app), blacklisted_app, app_name),
-    package_name = if_else(!is.na(blacklisted_app), "blacklsited_package", package_name)
-  ) %>% 
+    package_name = if_else(!is.na(blacklisted_app), "blacklisted_package", package_name)
+  ) %>%
   # add meta rows
-  bind_rows(app_meta) %>% 
+  bind_rows(app_meta) %>%
   # add screen rows
   bind_rows(screen_start_stop) %>% 
   group_by(panelist_id) %>% 
   arrange(start_time, .by_group = TRUE) %>% 
   ungroup() %>% 
   mutate(
-    app_name = app_name %>%  
-      str_to_lower(locale = "C") %>% 
+    app_name = app_name %>%
+      str_to_lower(locale = "C") %>%
       str_replace_all("[^\\x00-\\x7F]", " ") %>%  # Entfernt Nicht-ASCII
       str_replace_all("[^a-z0-9\\s]", " ") %>%   # Entfernt spezielle Zeichen (außer a-z, 0-9, Leerzeichen)
       str_squish()
-  ) %>% 
+  ) %>%
   select(
     panelist_id,
     date,
@@ -1143,7 +1165,7 @@ red_data_clean = red_start_stop %>%
     package_name,
     event,
     rows_merged
-    ) 
+    )
 ```
 
 Now we have achieved a nice, tidy data set.
@@ -1156,44 +1178,44 @@ glimpse(red_data_clean)
 Then we'll use this data set to determine the most frequently used apps.
 
 ```{r}
-most_visited_apps = red_data_clean %>% 
-  filter(!app_name == "Android-System") %>% 
+most_visited_apps = red_data_clean %>%
+  filter(!app_name == "Android-System") %>%
   # group by application
-  group_by(app_name) %>% 
+  group_by(app_name) %>%
   # summarise the total number of visits for each application
   summarise(
     visit = n()
-  ) %>% 
+  ) %>%
   # sort in descending order
-  arrange(desc(visit)) %>% 
+  arrange(desc(visit)) %>%
   # select the top 10 rows
-  head(n = 10) 
+  head(n = 10)
 most_visited_apps
 ```
 
 A table is nice but a plot is better. Let's visualize our findings using ggplot.
 
 ```{r}
-red_n_participants = red_data_clean %>% 
+red_n_participants = red_data_clean %>%
   summarise(
     n_panelist = n_distinct(panelist_id)
-  ) %>% 
+  ) %>%
   pull(n_panelist)
 
 plot7 = ggplot(most_visited_apps, aes(x = reorder(app_name, visit), y = visit)) +
   geom_col(width = 0.6, fill = "#BF616A") +
   coord_flip() +
-  geom_text(aes(label = visit), hjust = -0.2, size = 3, family = "Times New Roman") +
+  geom_text(aes(label = visit), hjust = -0.2, size = 3, family = "serif") +
   scale_y_continuous(expand = expansion(mult = c(0, 0.15))) +
-  theme_minimal(base_size = 13, base_family = "Times New Roman") +
+  theme_minimal(base_size = 13, base_family = "serif") +
   theme(
     legend.position = "none",
-    plot.title = element_text(face = "bold", size = 14, family = "Times New Roman"),
-    axis.text.y = element_text(family = "Times New Roman"),
-    axis.text.x = element_text(family = "Times New Roman")
+    plot.title = element_text(face = "bold", size = 14, family = "serif"),
+    axis.text.y = element_text(family = "serif"),
+    axis.text.x = element_text(family = "serif")
   ) +
   labs(
-    title = "Top 10 most used apps",
+    title = "Top 10 most used apps by number of visits",
     subtitle = paste0("Data based on a Sample of German Internet Users (N = ", red_n_participants, ")"),
     x = "App Name",
     y = "Visits"
@@ -1212,9 +1234,9 @@ shares = red_data_clean %>%
   group_by(app_name) %>% 
   summarise(
     n_shares = n()
-  ) %>% 
-  arrange(desc(n_shares)) %>% 
-  head(n = 5) %>% 
+  ) %>%
+  arrange(desc(n_shares)) %>%
+  head(n = 5) %>%
   mutate(
     app_name = str_replace(app_name, "Fotos�& Videos", "Fotos & Videos")
   )
@@ -1222,14 +1244,14 @@ shares = red_data_clean %>%
 plot8 = ggplot(shares, aes(x = reorder(app_name, n_shares), y = n_shares)) +
   geom_col(width = 0.6, fill = "#BF616A") +
   coord_flip() +
-  geom_text(aes(label = n_shares), hjust = -0.2, size = 3, family = "Times New Roman") +
+  geom_text(aes(label = n_shares), hjust = -0.2, size = 3, family = "serif") +
   scale_y_continuous(expand = expansion(mult = c(0, 0.15))) +
-  theme_minimal(base_size = 13, base_family = "Times New Roman") +
+  theme_minimal(base_size = 13, base_family = "serif") +
   theme(
     legend.position = "none",
-    plot.title = element_text(face = "bold", size = 14, family = "Times New Roman"),
-    axis.text.y = element_text(family = "Times New Roman"),
-    axis.text.x = element_text(family = "Times New Roman")
+    plot.title = element_text(face = "bold", size = 14, family = "serif"),
+    axis.text.y = element_text(family = "serif"),
+    axis.text.x = element_text(family = "serif")
   ) +
   labs(
     title = "Top 5 apps with most shares",
@@ -1240,6 +1262,8 @@ plot8 = ggplot(shares, aes(x = reorder(app_name, n_shares), y = n_shares)) +
 
 plot8
 ```
+
+<!-- BOOKMARK SHOULD WE QUICKLY EXPLAIN WHAT SHARES ARE? -->
 
 ## Calculating the number of notifications per app
 
@@ -1252,22 +1276,22 @@ notifications = red_data_clean %>%
   group_by(app_name) %>% 
   summarise(
     n_notifications = n()
-  ) %>% 
-  arrange(desc(n_notifications)) %>% 
+  ) %>%
+  arrange(desc(n_notifications)) %>%
   head(n = 5)
 
 
 plot9 = ggplot(notifications, aes(x = reorder(app_name, n_notifications), y = n_notifications)) +
   geom_col(width = 0.6, fill = "#BF616A") +
   coord_flip() +
-  geom_text(aes(label = n_notifications), hjust = -0.2, size = 3, family = "Times New Roman") +
+  geom_text(aes(label = n_notifications), hjust = -0.2, size = 3, family = "serif") +
   scale_y_continuous(expand = expansion(mult = c(0, 0.15))) +
-  theme_minimal(base_size = 13, base_family = "Times New Roman") +
+  theme_minimal(base_size = 13, base_family = "serif") +
   theme(
     legend.position = "none",
-    plot.title = element_text(face = "bold", size = 14, family = "Times New Roman"),
-    axis.text.y = element_text(family = "Times New Roman"),
-    axis.text.x = element_text(family = "Times New Roman")
+    plot.title = element_text(face = "bold", size = 14, family = "serif"),
+    axis.text.y = element_text(family = "serif"),
+    axis.text.x = element_text(family = "serif")
   ) +
   labs(
     title = "Top 5 apps with most notifications",
@@ -1279,14 +1303,16 @@ plot9 = ggplot(notifications, aes(x = reorder(app_name, n_notifications), y = n_
 plot9
 ```
 
-I don't think it's surprising that WhatsApp sends the most notifications.
+It's not surprising that WhatsApp sends the highest number of notifications.
 
-We have now looked at some aspects of Android app data. There is still more exciting information that can be extracted from the data, but this is enough for this tutorial. That brings us to the end.
+<!-- BOOKMARK - EXPLAIN PLOT IN MORE DETAILS? I'M SURPRISE THAT THE CAMERA APP SENDS THAT MANY NOTIFICATIONS. WHEN DOES THIS HAPPEN? -->
+
+We have now looked at several core aspects of Android app log data. Depending on the research question you can extract and use more exciting information from the data. For this tutorial, however, this is sufficient and it brings us to the end.
 
 ![Image generated by Midjourney](images/image_4_person_underground_v2.png) <!-- End -->
 
 # Conclusion
 
-If you've made it this far, I hope we've been able to give you a good introduction to the processing and analysis of Android log data. Among other things, we have covered data processing, which includes removing duplicates and consecutive apps, removing background processes, and using blacklists and Android event types. You have also gained an overview of the most common analysis dimensions for app tracking data, which include app, person, and time levels.
+If you've made it this far, I hope we've been able to give you a good introduction to the processing and analysis of Android log data. Among other things, we have covered data processing, which includes removing duplicates and consecutive apps, removing background processes, and using blacklists and Android event types. You have also gained an overview of the most common analysis dimensions for app tracking data, which include app, person, and time levels. Good luck!
 
 # References
