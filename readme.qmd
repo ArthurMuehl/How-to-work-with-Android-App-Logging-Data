@@ -291,14 +291,14 @@ blue_n_participants = blue_data_clean %>%
 plot1 = ggplot(most_visited_apps, aes(x = reorder(app_name, visit), y = visit)) +
   geom_col(width = 0.6, fill = "#5E81AC") +
   coord_flip() +
-  geom_text(aes(label = visit), hjust = -0.2, size = 3, family = "Times New Roman") +
+  geom_text(aes(label = visit), hjust = -0.2, size = 3, family = "serif") +
   scale_y_continuous(expand = expansion(mult = c(0, 0.15))) +
-  theme_minimal(base_size = 13, base_family = "Times New Roman") +
+  theme_minimal(base_size = 13, base_family = "serif") +
   theme(
     legend.position = "none",
-    plot.title = element_text(face = "bold", size = 14, family = "Times New Roman"),
-    axis.text.y = element_text(family = "Times New Roman"),
-    axis.text.x = element_text(family = "Times New Roman")
+    plot.title = element_text(face = "bold", size = 14, family = "serif"),
+    axis.text.y = element_text(family = "serif"),
+    axis.text.x = element_text(family = "serif")
   ) +
   labs(
     title = "Top 10 most used apps by number of visits",
@@ -339,14 +339,14 @@ Let's plot this again.
 plot2 = ggplot(most_used_apps, aes(x = reorder(app_name, duration), y = duration)) +
   geom_col(width = 0.6, fill = "#5E81AC") +
   coord_flip() +
-  geom_text(aes(label = duration), hjust = -0.2, size = 3, family = "Times New Roman") +
+  geom_text(aes(label = duration), hjust = -0.2, size = 3, family = "serif") +
   scale_y_continuous(expand = expansion(mult = c(0, 0.15))) +
-  theme_minimal(base_size = 13, base_family = "Times New Roman") +
+  theme_minimal(base_size = 13, base_family = "serif") +
   theme(
     legend.position = "none",
-    plot.title = element_text(face = "bold", size = 14, family = "Times New Roman"),
-    axis.text.y = element_text(family = "Times New Roman"),
-    axis.text.x = element_text(family = "Times New Roman")
+    plot.title = element_text(face = "bold", size = 14, family = "serif"),
+    axis.text.y = element_text(family = "serif"),
+    axis.text.x = element_text(family = "serif")
   ) +
   labs(
     title = "Top 10 most used apps by total duration",
@@ -387,13 +387,14 @@ instagram_participants = blue_data_clean %>%
 plot3 = ggplot(instagram_participants, aes(x = metric, y = value, fill = metric)) +
   geom_violin(trim = FALSE, alpha = 0.6) +
   geom_boxplot(width = 0.2, outlier.size = 0.8, alpha = 0.9) +
+  stat_summary(fun = mean, geom = "point", shape = 4, size = 3) +
   scale_y_continuous(expand = expansion(mult = c(0, 0.15))) +
   scale_fill_manual(
     values = c("visits" = "#5E81AC", "duration" = "#5EA8AC"),
     labels = c("Visits", "Duration (minutes)")
   ) +
   facet_wrap(~ metric, scales = "free") +
-  theme_minimal(base_size = 13, base_family = "Times New Roman") +
+  theme_minimal(base_size = 13, base_family = "serif") +
   theme(
     legend.position = "none",
     strip.text = element_text(face = "bold", size = 12),
@@ -409,7 +410,9 @@ plot3 = ggplot(instagram_participants, aes(x = metric, y = value, fill = metric)
 plot3
 ```
 
-Okay, let's try to get a better idea of what's going on in our data set. To better understand the variation in our data, we examine Instagram usage at the individual level and analyse how usage differs across participants and across days. Plotting these distributions illustrates the differences in frequency and duration of app usage between participants and shows the skewed distribution.
+The violin plot shows how duration differs across participants. The boxplot indicates the median duration and the interquartile range, while the X marks the mean.
+
+Next, let's try to get a better idea of what's going on in our data set. To better understand the variation in our data, we examine Instagram usage at the individual level and analyse how usage differs across participants and across days. Plotting these distributions illustrates the differences in frequency and duration of app usage between participants and shows the skewed distribution.
 
 ```{r}
 random_sample_25 = blue_data_clean %>% 
@@ -440,10 +443,11 @@ plot3 = ggplot(instagram_participants_days,
       y = value,
       fill = metric)) +
   geom_boxplot(width = 0.5, outlier.size = 1, alpha = 0.8) +
+  stat_summary(fun = mean, geom = "point", shape = 4, size = 2) +
   facet_wrap(~ metric, scales = "free_y") +
   scale_fill_manual(values = c("duration" = "#5EA8AC")) +
   coord_flip() +
-  theme_minimal(base_size = 13, base_family = "Times New Roman") +
+  theme_minimal(base_size = 13, base_family = "serif") +
   theme(
     legend.position = "none",
     legend.title = element_blank()
@@ -456,9 +460,10 @@ plot3 = ggplot(instagram_participants_days,
   )
 
 plot3
+
 ```
 
-The large variance in the data is clearly evident here. The same applies to the occurrence of extreme values. This skewed distribution is also reflected in the widely differing values for the median and the mean. Against this background, the distribution of the app tracking data should be taken into account when selecting the parameters to be calculated (mean, median, etc.).
+The large variance in media usage duration, both across and within participants, is clearly evident here. The same applies to the occurrence of extreme values. This skewed distribution is also reflected in the widely differing values for the median and the mean. Against this background, the distribution of the app tracking data should be taken into account when selecting the parameters to be calculated.
 
 ## Mobile Behavior over time
 
@@ -502,7 +507,7 @@ plot4 = ggplot(week, aes(x = date, y = value, color = metric)) +
   scale_x_date(date_breaks = "1 day",
                date_labels = "%d.%m") +
   facet_wrap(~ app_name, ncol = 2, scales = "free_y") +
-  theme_minimal(base_size = 13, base_family = "Times New Roman") +
+  theme_minimal(base_size = 13, base_family = "serif") +
   theme(
     legend.title = element_blank(),
     legend.position = "top",
@@ -597,7 +602,7 @@ plot5 = ggplot(hourly_data, aes(x = hour, y = mean_hour_share)) +
   scale_x_datetime(date_breaks = "2 hour",
                    date_labels = "%H:%M") +
   facet_wrap(~ app_name, ncol = 2, scales = "free_y") +
-  theme_minimal(base_size = 13, base_family = "Times New Roman") +
+  theme_minimal(base_size = 13, base_family = "serif") +
   theme(
     legend.position = "none",
     plot.title = element_text(face = "bold"),
@@ -705,13 +710,12 @@ app_levels = unique(instagram_visual$app_name)
 apps_without_gap = setdiff(app_levels, "GAP")
 gap_color = c("GAP" = "#D8DEE9")
 
-colors =  c("#5E81AC", "#5EA8AC", "#625EAC", "#AC625E","#A8AC5E") 
-
-app_colors = setNames(
-  rep(colors, length.out = length(apps_without_gap)), apps_without_gap
+app_colors <- setNames(
+  grDevices::hcl.colors(length(apps_without_gap), palette = "Dynamic"),
+  apps_without_gap
 )
 
-color_map = c(gap_color, app_colors)
+color_map <- c(gap_color, app_colors)
 
 plot6 = ggplot(instagram_visual) +
   geom_segment(
@@ -732,7 +736,7 @@ plot6 = ggplot(instagram_visual) +
     y = NULL,
     title = "Instagram Usage Sequence of a Random User",
   ) +
-  theme_minimal(base_size = 13, base_family = "Times New Roman") +
+  theme_minimal(base_size = 13, base_family = "serif") +
   theme(
     legend.title = element_blank(),
     legend.position = "top",
@@ -741,7 +745,12 @@ plot6 = ggplot(instagram_visual) +
     axis.text.y  = element_blank(),
     axis.title.y = element_blank(),
     axis.ticks.y = element_blank()
-  )
+  )+ 
+   theme(
+    legend.position = "right",
+    legend.title = element_blank()
+  ) +
+  guides(color = guide_legend(override.aes = list(linewidth = 3)))
 
 plot6
 ```
@@ -873,7 +882,7 @@ event_types = red_data %>%
     n = n()
   ) %>% 
   arrange(desc(n)) 
-event_types
+print(event_types, n = Inf)
 ```
 
 If we take a closer look, we see that there are some event types here that are not listed in the official Android documentation, e.g., event_type = 100. This can happen when manufacturers use a customized version of Android. For us, this means specifically that we do not know what event_type 100 stands for. I was also unable to find any reliable information on this. Welcome to the messy reality! For the purposes of this tutorial, we will ignore these unknown event types since they are rare in our data set. In applied research, however, such decisions should always be documented, and sensitivity analyses are recommended if these types of events are more frequent.
@@ -1196,17 +1205,17 @@ red_n_participants = red_data_clean %>%
 plot7 = ggplot(most_visited_apps, aes(x = reorder(app_name, visit), y = visit)) +
   geom_col(width = 0.6, fill = "#BF616A") +
   coord_flip() +
-  geom_text(aes(label = visit), hjust = -0.2, size = 3, family = "Times New Roman") +
+  geom_text(aes(label = visit), hjust = -0.2, size = 3, family = "serif") +
   scale_y_continuous(expand = expansion(mult = c(0, 0.15))) +
-  theme_minimal(base_size = 13, base_family = "Times New Roman") +
+  theme_minimal(base_size = 13, base_family = "serif") +
   theme(
     legend.position = "none",
-    plot.title = element_text(face = "bold", size = 14, family = "Times New Roman"),
-    axis.text.y = element_text(family = "Times New Roman"),
-    axis.text.x = element_text(family = "Times New Roman")
+    plot.title = element_text(face = "bold", size = 14, family = "serif"),
+    axis.text.y = element_text(family = "serif"),
+    axis.text.x = element_text(family = "serif")
   ) +
   labs(
-    title = "Top 10 most used apps",
+    title = "Top 10 most used apps by number of visits",
     subtitle = paste0("Data based on a Sample of German Internet Users (N = ", red_n_participants, ")"),
     x = "App Name",
     y = "Visits"
@@ -1235,14 +1244,14 @@ shares = red_data_clean %>%
 plot8 = ggplot(shares, aes(x = reorder(app_name, n_shares), y = n_shares)) +
   geom_col(width = 0.6, fill = "#BF616A") +
   coord_flip() +
-  geom_text(aes(label = n_shares), hjust = -0.2, size = 3, family = "Times New Roman") +
+  geom_text(aes(label = n_shares), hjust = -0.2, size = 3, family = "serif") +
   scale_y_continuous(expand = expansion(mult = c(0, 0.15))) +
-  theme_minimal(base_size = 13, base_family = "Times New Roman") +
+  theme_minimal(base_size = 13, base_family = "serif") +
   theme(
     legend.position = "none",
-    plot.title = element_text(face = "bold", size = 14, family = "Times New Roman"),
-    axis.text.y = element_text(family = "Times New Roman"),
-    axis.text.x = element_text(family = "Times New Roman")
+    plot.title = element_text(face = "bold", size = 14, family = "serif"),
+    axis.text.y = element_text(family = "serif"),
+    axis.text.x = element_text(family = "serif")
   ) +
   labs(
     title = "Top 5 apps with most shares",
@@ -1253,6 +1262,8 @@ plot8 = ggplot(shares, aes(x = reorder(app_name, n_shares), y = n_shares)) +
 
 plot8
 ```
+
+<!-- BOOKMARK SHOULD WE QUICKLY EXPLAIN WHAT SHARES ARE? -->
 
 ## Calculating the number of notifications per app
 
@@ -1273,14 +1284,14 @@ notifications = red_data_clean %>%
 plot9 = ggplot(notifications, aes(x = reorder(app_name, n_notifications), y = n_notifications)) +
   geom_col(width = 0.6, fill = "#BF616A") +
   coord_flip() +
-  geom_text(aes(label = n_notifications), hjust = -0.2, size = 3, family = "Times New Roman") +
+  geom_text(aes(label = n_notifications), hjust = -0.2, size = 3, family = "serif") +
   scale_y_continuous(expand = expansion(mult = c(0, 0.15))) +
-  theme_minimal(base_size = 13, base_family = "Times New Roman") +
+  theme_minimal(base_size = 13, base_family = "serif") +
   theme(
     legend.position = "none",
-    plot.title = element_text(face = "bold", size = 14, family = "Times New Roman"),
-    axis.text.y = element_text(family = "Times New Roman"),
-    axis.text.x = element_text(family = "Times New Roman")
+    plot.title = element_text(face = "bold", size = 14, family = "serif"),
+    axis.text.y = element_text(family = "serif"),
+    axis.text.x = element_text(family = "serif")
   ) +
   labs(
     title = "Top 5 apps with most notifications",
@@ -1293,6 +1304,8 @@ plot9
 ```
 
 It's not surprising that WhatsApp sends the highest number of notifications.
+
+<!-- BOOKMARK - EXPLAIN PLOT IN MORE DETAILS? I'M SURPRISE THAT THE CAMERA APP SENDS THAT MANY NOTIFICATIONS. WHEN DOES THIS HAPPEN? -->
 
 We have now looked at several core aspects of Android app log data. Depending on the research question you can extract and use more exciting information from the data. For this tutorial, however, this is sufficient and it brings us to the end.
 
