@@ -1,0 +1,8 @@
+install.packages("dplyr")
+install.packages("tidyr")
+install.packages("stringr")
+install.packages("lubridate")
+install.packages("ggplot2")
+install.packages("scales")
+install.packages("forcats")
+install.packages("extrafont")
